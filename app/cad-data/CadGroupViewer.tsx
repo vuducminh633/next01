@@ -1,18 +1,17 @@
-// app/cad-data/CadGroupViewer.tsx
 "use client";
 
 import { useState } from "react";
-import { markGroupAsViewed } from "../actions";
-import MeshViewer from "../../components/MeshViewer"; // Ensure this path is correct
+// import { markGroupAsViewed } from "../actions"; // REMOVED to fix build error
+import MeshViewer from "../../components/MeshViewer"; 
 
-// Type matches our Prisma Model
+// Type matches our Prisma/Drizzle Model
 type CadItem = {
   id: number;
   groupName: string | null;
   handle: string;
   objectType: string | null;
   layer: string | null;
-  properties: any; // Json type from DB maps to any/unknown
+  properties: any;
   isNew: boolean;
 };
 
@@ -20,7 +19,7 @@ export default function CadGroupViewer({ data }: { data: CadItem[] }) {
   const [selectedItem, setSelectedItem] = useState<CadItem | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
-  // 1. Group the data by "groupName"
+  // 1. Group the data by "groupName" (or viaName if preferred)
   const groupedData = data.reduce((acc, item) => {
     const group = item.groupName || "Ungrouped";
     if (!acc[group]) acc[group] = [];
@@ -28,7 +27,7 @@ export default function CadGroupViewer({ data }: { data: CadItem[] }) {
     return acc;
   }, {} as Record<string, CadItem[]>);
 
-  // 2. Toggle Group Expansion & DB Update
+  // 2. Toggle Group Expansion
   const toggleGroup = async (groupName: string, items: CadItem[]) => {
     const next = new Set(expandedGroups);
     
@@ -36,12 +35,7 @@ export default function CadGroupViewer({ data }: { data: CadItem[] }) {
       next.delete(groupName); // Collapse
     } else {
       next.add(groupName); // Expand
-      
-      // If this group has new items, mark them as read in DB
-      const hasNewItems = items.some((item) => item.isNew);
-      if (hasNewItems) {
-        await markGroupAsViewed(groupName);
-      }
+      // Note: "Mark as viewed" logic removed for now
     }
     setExpandedGroups(next);
   };
@@ -117,7 +111,7 @@ export default function CadGroupViewer({ data }: { data: CadItem[] }) {
       {/* Modal Overlay */}
       {selectedItem && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-           
+            
            <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full overflow-hidden flex flex-col max-h-[90vh]">
              
              {/* Modal Header */}
@@ -138,17 +132,17 @@ export default function CadGroupViewer({ data }: { data: CadItem[] }) {
                {/* Visual Preview */}
                <div className="mb-6 bg-gray-100 border rounded-xl overflow-hidden h-[300px] flex items-center justify-center relative">
                   {(selectedItem.objectType === "Circle" || selectedItem.objectType === "Arc" || selectedItem.objectType === "Polyline" || selectedItem.objectType === "Line") ? (
-                     <div className="w-full h-full">
-                       <MeshViewer 
-                         type={selectedItem.objectType as any} 
-                         data={selectedItem.properties} 
-                       />
-                     </div>
+                      <div className="w-full h-full">
+                        <MeshViewer 
+                          type={selectedItem.objectType as any} 
+                          data={selectedItem.properties} 
+                        />
+                      </div>
                   ) : (
-                     <div className="text-gray-400 text-sm flex flex-col items-center gap-2">
-                       <span>🚫</span>
-                       <span>No visual preview available for {selectedItem.objectType}</span>
-                     </div>
+                      <div className="text-gray-400 text-sm flex flex-col items-center gap-2">
+                        <span>🚫</span>
+                        <span>No visual preview available for {selectedItem.objectType}</span>
+                      </div>
                   )}
                </div>
 

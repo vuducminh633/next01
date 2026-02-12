@@ -1,40 +1,15 @@
 "use server";
 
-import { vietnamData, users, cadObjects } from "@/lib/schema";
+import { users, cadObjects, drillCoreData, maps } from "@/lib/schema";
 import { db } from "@/lib/db";
-import { eq, desc, asc, isNotNull, sql } from "drizzle-orm";
+import { eq, desc, sql, and  } from "drizzle-orm";
 import bcrypt from "bcrypt";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import Redis from "ioredis";
+import { runCppConverter } from "@/lib/bridge";
 
-// 1. Fetch Vietnam Geo Data
-export async function getGeoData() {
-  try {
-    const data = await db
-      .select({
-        id: vietnamData.gid,
-        name: vietnamData.name,
-        type: vietnamData.fclass,
-        code: vietnamData.code,
-        bridge: vietnamData.bridge,
-        tunnel: vietnamData.tunnel,
-        speed: vietnamData.maxspeed,
-        geoText: sql<string>`ST_AsText(${vietnamData.geom})`,
-      })
-      .from(vietnamData)
-      .where(isNotNull(vietnamData.name))
-      .limit(20)
-      .orderBy(asc(vietnamData.gid));
-
-    return data;
-  } catch (error) {
-    console.error("Database Error:", error);
-    return [];
-  }
-}
-
-// 2. Register User
+// --- USER AUTHENTICATION ---
 export async function registerUser(prevState: any, formData: FormData) {
   const name = formData.get("name") as string;
   const email = formData.get("email") as string;
@@ -69,116 +44,228 @@ export async function registerUser(prevState: any, formData: FormData) {
   redirect("/login");
 }
 
-// 3. Mark Group as Viewed (Remove "NEW" badge)
-export async function markGroupAsViewed(groupName: string) {
-  try {
-    await db
-      .update(cadObjects)
-      .set({ isNew: false })
-      .where(eq(cadObjects.groupName, groupName));
+// --- CAD DATA MANAGEMENT ---
 
-    revalidatePath("/cad-data");
-  } catch (error) {
-    console.error("Failed to mark group as viewed:", error);
-  }
-}
-
-// 4. Save CAD Data (Manual Upload from File)
+// Save CAD Data (Simplified: Create Map -> Save Objects)
 export async function saveCadData(jsonData: any[]) {
+  console.log(`[Server] saveCadData called with ${jsonData?.length} items`);
+
   try {
-    if (!Array.isArray(jsonData)) {
-      return { error: "Invalid JSON format. Expected an array." };
+    if (!Array.isArray(jsonData) || jsonData.length === 0) {
+      console.error("[Server] Error: Data is not an array or is empty");
+      return { error: "Invalid JSON format or empty data." };
     }
 
-    const records = jsonData.map((item) => ({
-      groupName: item.GroupName,
-      handle: item.Handle,
-      objectType: item.ObjectType,
-      layer: item.Layer,
-      properties: item,
-      isNew: true, // Mark as new so it pulses in UI
-    }));
+    // 1. Group by Map
+    const dataByMap: Record<string, typeof jsonData> = {};
+    for (const item of jsonData) {
+      const mapName = item.MapName || "Untitled Map";
+      if (!dataByMap[mapName]) dataByMap[mapName] = [];
+      dataByMap[mapName].push(item);
+    }
 
-    await db.insert(cadObjects).values(records);
+    let lastMapId: number | null = null;
 
-    revalidatePath("/cad-data");
-    return { success: true };
+    // 2. Process Maps
+    for (const [mapName, items] of Object.entries(dataByMap)) {
+      console.log(`[Server] Processing Map: "${mapName}" with ${items.length} objects`);
+
+      // 1. ALWAYS CREATE OR FIND MAP (Upsert-like logic)
+      let mapRecord;
+      
+      // Try finding first
+      const [existingMap] = await db.select().from(maps).where(eq(maps.name, mapName)).limit(1);
+      
+      if (existingMap) {
+         mapRecord = existingMap;
+      } else {
+         console.log(`[Server] Map "${mapName}" not found. Creating new...`);
+         const [newMap] = await db.insert(maps).values({ name: mapName }).returning();
+         mapRecord = newMap;
+      }
+      
+      console.log(`[Server] Using Map ID: ${mapRecord.id}`);
+      lastMapId = mapRecord.id;
+
+      // 2. Insert Objects
+      const records = items.map((item: any) => ({
+        mapId: mapRecord!.id,
+        handle: item.Handle,
+        layer: item.Layer,
+        viaName: item.ViaName,
+        blockName: item.BlockName,
+        partType: item.Type,
+        objectType: "Polyline",
+        properties: item,
+        isNew: true,
+      }));
+
+      console.log(`[Server] Bulk inserting/updating ${records.length} records...`);
+      
+     console.log(`[Server] Inserting ${records.length} records into DB...`);
+      await db.insert(cadObjects).values(records);
+      
+      console.log(`[Server] DB Write Successful for ${mapName}`);
+        
+      console.log(`[Server] Success for ${mapName}`);
+    }
+
+    // Refresh UI
+    console.log("[Server] Revalidating Layout...");
+    revalidatePath("/", "layout");
+    
+    return { success: true, count: jsonData.length, mapId: lastMapId };
+
   } catch (error) {
-    console.error("Upload Error:", error);
-    return { error: "Failed to save data to server." };
+    console.error("[Server] CRITICAL SAVE ERROR:", error);
+    return { error: "Failed to process map data." };
   }
 }
 
-// 5. Fetch CAD Data for Display
-export async function getCadData() {
-  const data = await db
-    .select()
-    .from(cadObjects)
-    .orderBy(desc(cadObjects.createdAt))
-    .limit(100); // Increased limit slightly to see more history
+// --- DATA FETCHING ---
 
-  return data;
+export async function getMaps() {
+  return await db.select().from(maps).orderBy(desc(maps.createdAt));
 }
 
-// ---------------------------------------------------------
-// 6. NEW FUNCTION: Sync from Redis (Button Click)
-// ---------------------------------------------------------
-export async function syncRedisData() {
-  let redis: Redis | null = null;
+export async function getMapObjects(mapId: number) {
+  return await db
+    .select()
+    .from(cadObjects)
+    .where(eq(cadObjects.mapId, mapId))
+    .orderBy(desc(cadObjects.createdAt));
+}
+
+// --- 3D GENERATION STUB ---
+export async function generate3DModel(id: number) {
+  try {
+    // 1. Find the target object to get its group identifiers
+    const [target] = await db.select().from(cadObjects).where(eq(cadObjects.id, id));
+    if (!target || !target.viaName || !target.blockName) {
+      return { error: "Object or group metadata not found." };
+    }
+
+    // 2. Fetch ALL fragments in this group [cite: 142]
+    // The C++ tool needs the entire collection to perform stitching [cite: 202, 205]
+    const fragments = await db
+      .select()
+      .from(cadObjects)
+      .where(
+        and(
+          eq(cadObjects.mapId, target.mapId),
+          eq(cadObjects.viaName, target.viaName),
+          eq(cadObjects.blockName, target.blockName)
+        )
+      );
+
+    console.log(`[Server] Merging ${fragments.length} fragments for ${target.viaName} - ${target.blockName}`);
+
+    // 3. Call the C++ bridge with the full array [cite: 65, 197]
+    const mesh = await runCppConverter(fragments);
+
+    if (!mesh) return { error: "C++ conversion failed to produce a mesh." };
+
+    // 4. Update all objects in the group with the new mesh data [cite: 128]
+    // This ensures that clicking any part of the tunnel shows the full stitched model
+    const updatedProperties = {
+      threeDGeometry: mesh,
+      processingStatus: "done",
+      vertexCount: mesh.vertices.length / 3, // [cite: 294]
+    };
+
+    await db
+      .update(cadObjects)
+      .set({
+        properties: sql`properties || ${JSON.stringify(updatedProperties)}::jsonb`,
+        isNew: false,
+      })
+      .where(
+        and(
+          eq(cadObjects.mapId, target.mapId),
+          eq(cadObjects.viaName, target.viaName),
+          eq(cadObjects.blockName, target.blockName)
+        )
+      );
+
+    revalidatePath("/", "layout");
+    return { success: true, mesh };
+  } catch (error) {
+    console.error("Merge-and-Generate Error:", error);
+    return { error: "Server error during 3D generation." };
+  }
+}
+
+// --- REDIS AUTOMATION ---
+
+export async function autoFetchFromRedis() {
+  const redis = new Redis({
+    host: "127.0.0.1",
+    port: 6379,
+    connectTimeout: 2000,
+    lazyConnect: true,
+  });
 
   try {
-    redis = new Redis({
-      host: "127.0.0.1",
-      port: 6379,
-      lazyConnect: true,      
-      maxRetriesPerRequest: 0, 
-      connectTimeout: 5000,   
-    });
-
-    redis.on("error", (err) => {
-      // We suppress the error here because we handle it in the try/catch below
-    });
-
+     console.log("[Redis] Connecting...");
     await redis.connect();
-
     const rawData = await redis.get("latest_mining_data");
 
     if (!rawData) {
-      return { error: "Tunnel is open, but no data found in Redis." };
+      await redis.quit();
+      return { success: false, message: "No new data" };
     }
 
-    const jsonData = JSON.parse(rawData);
-
+    console.log(`[Redis] DATA RECEIVED! Length: ${rawData.length} chars`);
+    
+    let jsonData;
+    try {
+      jsonData = JSON.parse(rawData);
+    } catch (e) {
+      console.error("[Redis] JSON Parse Error:", e);
+      await redis.quit();
+      return { success: false, error: "Invalid JSON in Redis" };
+    }
 
     const dataArray = Array.isArray(jsonData) ? jsonData : [jsonData];
-    const records = dataArray.map((item: any) => ({
-      groupName: item.GroupName || "Tunnel_Import",
-      handle: item.Handle || "Unknown",
-      objectType: item.ObjectType || "Unknown",
-      layer: item.Layer || "0",
-      properties: item,
-      isNew: true,
-    }));
+    console.log(`[Redis] Sending ${dataArray.length} items to DB...`);
 
-    if (records.length > 0) {
-      await db.insert(cadObjects).values(records);
+    const result = await saveCadData(dataArray);
+
+    if (result.success) {
+      console.log("[Redis] Save Successful. Deleting key...");
+      await redis.del("latest_mining_data");
+      await redis.quit();
+      return { success: true, count: result.count, mapId: result.mapId };
+    } else {
+      console.error("[Redis] Save Failed:", result.error);
     }
 
-    revalidatePath("/cad-data");
-    return { success: true, count: records.length };
-
-  } catch (error) {
-    // This will catch the actual failure nicely
-    console.error("Sync Failed:", error);
-    return { error: "Connection failed. Is your SSH tunnel running?" };
-  } finally {
-
-    if (redis) {
-      try {
- 
-        redis.disconnect(); 
-      } catch (e) {
-      }
-    }
+    await redis.quit();
+    return { success: false };
+  } catch (err) {
+    console.error("[Redis] Connection Error:", err);
+    try { await redis.quit(); } catch {}
+    return { success: false };
   }
 }
+
+export async function deleteMap(mapId: number) {
+  try {
+    console.log(`[Server] Deleting Map ID: ${mapId}`);
+
+    // 1. Delete all objects associated with this map first
+    await db.delete(cadObjects).where(eq(cadObjects.mapId, mapId));
+
+    // 2. Delete the map entry itself
+    await db.delete(maps).where(eq(maps.id, mapId));
+
+    // 3. Revalidate to remove the card from the Hub immediately
+    revalidatePath("/", "layout");
+
+    return { success: true };
+  } catch (error) {
+    console.error("Delete Map Error:", error);
+    return { success: false, error: "Failed to delete project" };
+  }
+}
+
