@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MiningMesher - Trình Xem Poly2Tri</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="container">
+        <div id="header">
+            <h1>Trình Xem MiningMesher</h1>
+            <p>Công Cụ Trực Quan Hóa Tam Giác Poly2Tri</p>
+        </div>
+
+        <div id="controls">
+            <div class="control-group">
+                <h3>Tải Lên Dữ Liệu CAD</h3>
+                <input type="file" id="fileInput" accept=".json" style="display: none;">
+                <button id="uploadBtn" class="btn btn-primary">📁 Tải Lên Tệp JSON</button>
+                <p class="file-hint">Chọn một tệp JSON chứa dữ liệu đa giác CAD</p>
+            </div>
+
+            <div class="control-group">
+                <h3>Nhập Thủ Công (Tùy Chọn)</h3>
+                <textarea id="jsonInput" placeholder="Hoặc dán dữ liệu đa giác JSON của bạn vào đây..."></textarea>
+                <button id="loadSampleBtn" class="btn btn-secondary">Tải Dữ Liệu Mẫu</button>
+                <button id="processBtn" class="btn btn-primary">Xử Lý & Hiển Thị</button>
+            </div>
+
+            <div class="control-group">
+                <h3>Tùy Chọn Hiển Thị</h3>
+                <label>
+                    <input type="checkbox" id="wireframeToggle" checked>
+                    Hiển Thị Khung Dây
+                </label>
+                <label>
+                    <input type="checkbox" id="axesToggle" checked>
+                    Hiển Thị Trục Tọa Độ
+                </label>
+                <label>
+                    <input type="checkbox" id="gridToggle" checked>
+                    Hiển Thị Lưới
+                </label>
+            </div>
+
+            <div class="control-group">
+                <h3>Điều Khiển Góc Nhìn</h3>
+                <button id="resetViewBtn" class="btn btn-secondary">Đặt Lại Góc Nhìn</button>
+                <button id="topViewBtn" class="btn btn-secondary">Nhìn Từ Trên</button>
+                <button id="exportObjBtn" class="btn btn-secondary">Xuất OBJ</button>
+            </div>
+
+            <div id="stats">
+                <h3>Thông Tin Lưới</h3>
+                <div id="meshStats">
+                    <p>Đỉnh: <span id="vertexCount">0</span></p>
+                    <p>Tam Giác: <span id="triangleCount">0</span></p>
+                    <p>Đối Tượng: <span id="objectCount">0</span></p>
+                    <p style="margin-top: 10px; font-size: 0.85em; color: #7dd3fc;">
+                        🔄 Tự động làm mới đang hoạt động
+                    </p>
+                </div>
+            </div>
+
+            <div id="status">
+                <p id="statusText">Sẵn Sàng</p>
+            </div>
+        </div>
+
+        <div id="viewport">
+            <div id="canvas-container"></div>
+        </div>
+    </div>
+
+    <!-- Three.js - Local ES Module -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "./three/three.module.js",
+                "three/addons/": "./three/"
+            }
+        }
+    </script>
+    <script type="module" src="app.js"></script>
+</body>
+</html>

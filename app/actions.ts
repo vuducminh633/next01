@@ -2,7 +2,7 @@
 
 import { users, cadObjects, drillCoreData, maps } from "@/lib/schema";
 import { db } from "@/lib/db";
-import { eq, desc, sql, and  } from "drizzle-orm";
+import { eq, desc, sql, and  , inArray} from "drizzle-orm";
 import bcrypt from "bcrypt";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -70,10 +70,8 @@ export async function saveCadData(jsonData: any[]) {
     for (const [mapName, items] of Object.entries(dataByMap)) {
       console.log(`[Server] Processing Map: "${mapName}" with ${items.length} objects`);
 
-      // 1. ALWAYS CREATE OR FIND MAP (Upsert-like logic)
+      // Find or Create Map
       let mapRecord;
-      
-      // Try finding first
       const [existingMap] = await db.select().from(maps).where(eq(maps.name, mapName)).limit(1);
       
       if (existingMap) {
@@ -84,30 +82,31 @@ export async function saveCadData(jsonData: any[]) {
          mapRecord = newMap;
       }
       
-      console.log(`[Server] Using Map ID: ${mapRecord.id}`);
       lastMapId = mapRecord.id;
 
-      // 2. Insert Objects
+      // 3. Prepare Records with HIERARCHY MAPPING
       const records = items.map((item: any) => ({
         mapId: mapRecord!.id,
         handle: item.Handle,
         layer: item.Layer,
-        viaName: item.ViaName,
-        blockName: item.BlockName,
-        partType: item.Type,
-        objectType: "Polyline",
+        
+        // --- CRITICAL GROUPING FIELDS FOR STITCHING ---
+        // Ensure these match the keys in your Vỉa_Map.json exactly
+        viaName: item.ViaName || "Default_Via",    // Used by C++ to group fragments
+        blockName: item.BlockName || "Default_Block", // Used by C++ to group fragments
+        partType: item.Type || "Wall",             // Differentiates Floor vs Roof
+        
+        objectType: item.ObjectType || "Polyline",
         properties: item,
         isNew: true,
       }));
 
-      console.log(`[Server] Bulk inserting/updating ${records.length} records...`);
+      console.log(`[Server] Inserting ${records.length} records into DB for ${mapName}...`);
       
-     console.log(`[Server] Inserting ${records.length} records into DB...`);
+      // Use onConflictDoUpdate if you want to allow re-uploading without duplicates
       await db.insert(cadObjects).values(records);
       
       console.log(`[Server] DB Write Successful for ${mapName}`);
-        
-      console.log(`[Server] Success for ${mapName}`);
     }
 
     // Refresh UI
@@ -121,7 +120,6 @@ export async function saveCadData(jsonData: any[]) {
     return { error: "Failed to process map data." };
   }
 }
-
 // --- DATA FETCHING ---
 
 export async function getMaps() {
@@ -139,14 +137,13 @@ export async function getMapObjects(mapId: number) {
 // --- 3D GENERATION STUB ---
 export async function generate3DModel(id: number) {
   try {
-    // 1. Find the target object to get its group identifiers
+    // 1. Find the target object
     const [target] = await db.select().from(cadObjects).where(eq(cadObjects.id, id));
     if (!target || !target.viaName || !target.blockName) {
       return { error: "Object or group metadata not found." };
     }
 
-    // 2. Fetch ALL fragments in this group [cite: 142]
-    // The C++ tool needs the entire collection to perform stitching [cite: 202, 205]
+    // 2. Fetch ALL fragments in this group
     const fragments = await db
       .select()
       .from(cadObjects)
@@ -158,19 +155,23 @@ export async function generate3DModel(id: number) {
         )
       );
 
-    console.log(`[Server] Merging ${fragments.length} fragments for ${target.viaName} - ${target.blockName}`);
+    console.log(`[Server] Stitching ${fragments.length} fragments for ${target.viaName} - ${target.blockName}`);
 
-    // 3. Call the C++ bridge with the full array [cite: 65, 197]
+    // 3. Pass ENTIRE fragments array to C++ converter for stitching
     const mesh = await runCppConverter(fragments);
 
-    if (!mesh) return { error: "C++ conversion failed to produce a mesh." };
+    if (!mesh) {
+      console.error(`[Server] C++ conversion failed`);
+      return { error: "C++ conversion failed." };
+    }
 
-    // 4. Update all objects in the group with the new mesh data [cite: 128]
-    // This ensures that clicking any part of the tunnel shows the full stitched model
+    // 4. Update all objects in the group
     const updatedProperties = {
       threeDGeometry: mesh,
       processingStatus: "done",
-      vertexCount: mesh.vertices.length / 3, // [cite: 294]
+      vertexCount: mesh.vertices.length / 3,
+      fragmentCount: fragments.length,
+      stitched: true
     };
 
     await db
@@ -188,9 +189,9 @@ export async function generate3DModel(id: number) {
       );
 
     revalidatePath("/", "layout");
-    return { success: true, mesh };
+    return { success: true, mesh, fragmentCount: fragments.length };
   } catch (error) {
-    console.error("Merge-and-Generate Error:", error);
+    console.error("[Server] Generate 3D Error:", error);
     return { error: "Server error during 3D generation." };
   }
 }
@@ -266,6 +267,37 @@ export async function deleteMap(mapId: number) {
   } catch (error) {
     console.error("Delete Map Error:", error);
     return { success: false, error: "Failed to delete project" };
+  }
+}
+
+export async function generateBatch3DModel(ids: number[]) {
+  try {
+    if (ids.length === 0) return { error: "No IDs provided" };
+
+    // 1. Fetch ALL selected objects at once
+    const items = await db
+      .select()
+      .from(cadObjects)
+      .where(inArray(cadObjects.id, ids));
+
+    if (items.length === 0) return { error: "No items found" };
+
+    // 2. Send the WHOLE BATCH to the C++ Converter
+    // This allows the algorithms (Stitching, Walls) to actually work
+    const mesh = await runCppConverter(items);
+
+    if (!mesh) {
+        return { error: "Converter returned empty mesh" };
+    }
+
+    // 3. Return the combined mesh
+    // We don't save this huge mesh to every single object ID in the DB 
+    // to avoid massive duplication. We just return it for viewing.
+    return { success: true, mesh };
+
+  } catch (e) {
+    console.error("Batch Gen Error:", e);
+    return { error: "Server Error during batch generation" };
   }
 }
 
