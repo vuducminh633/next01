@@ -151,7 +151,7 @@ export default function MeshViewer({ type, data }: CadProps) {
         if (i === 0) ctx.moveTo(screenX, screenY);
         else ctx.lineTo(screenX, screenY);
       }
-      ctx.stroke();
+      ctx.stroke(); 
     }
 
   }, [wasm, data]); // Trigger whenever data changes

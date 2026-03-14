@@ -18,7 +18,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        {/* Mount the listener HERE so it runs on the Home Page, 
+        {/* 
            Hub Page, and Map Page automatically. 
         */}
         <CADListener />

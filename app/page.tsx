@@ -1,6 +1,7 @@
 import { auth } from "../auth";
 import { SignOut } from "../components/auth-buttons";
-import { getMaps } from "./actions"; 
+import { getMaps } from "./actions";
+import FileUploader from "../components/FileUploader"; 
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
@@ -28,6 +29,7 @@ export default async function Home() {
           <div className="flex items-center gap-6">
             <div className="text-right hidden sm:block">
               <p className="text-xs text-gray-400">Welcome back,</p>
+              <FileUploader />
               <p className="text-sm font-semibold text-white">{session.user?.name}</p>
             </div>
             <SignOut />

@@ -13,7 +13,7 @@ type Props = {
 };
 
 export default async function MapProjectPage({ params }: Props) {
-  // 2. AWAIT PARAMS: Unwrap the promise first
+  // AWAIT PARAMS: Unwrap the promise first
   const resolvedParams = await params;
   const mapId = parseInt(resolvedParams.id);
   
@@ -21,11 +21,11 @@ export default async function MapProjectPage({ params }: Props) {
     return notFound();
   }
 
-  // 3. Fetch Data for this specific Map
+  // Fetch Data for this specific Map
   const rawData = await getMapObjects(mapId);
 
-  // 4. Handle Empty State
-  if (!rawData || rawData.length === 0) {
+  // Handle Empty State
+  if (!rawData || !rawData.vias || rawData.vias.length === 0) {
     return (
       <div className="h-screen bg-[#0a0a0a] text-white flex items-center justify-center flex-col gap-6 font-sans">
         <div className="text-6xl opacity-20">📭</div>
@@ -39,19 +39,9 @@ export default async function MapProjectPage({ params }: Props) {
               &larr; Back to Hub
             </button>
           </Link>
-          {/* Removed Upload button since we use Redis only now */}
         </div>
       </div>
     );
   }
-
-  // 5. Format Data for Client Components
-  const formattedData = rawData.map((item) => ({
-    ...item,
-    properties: (item.properties as Record<string, any>) || {},
-    isNew: item.isNew ?? false,
-    createdAt: item.createdAt ? item.createdAt.toISOString() : null,
-  }));
-
-  return <CadUnityLayout initialData={formattedData} />;
+  return <CadUnityLayout initialData={rawData} />;
 }

@@ -1,169 +1,78 @@
 import { execFile } from "child_process";
+import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
-import os from "os";
 import crypto from "crypto";
 
-// --- CONFIGURATION ---
-const ROOT_DIR = process.cwd();
-// Ensure this points to the folder containing your compiled 'MiningMesher.exe'
-const BIN_DIR = path.join(ROOT_DIR, "bin"); 
-const EXE_PATH = path.join(BIN_DIR, "MiningMesher.exe");
+const execFileAsync = promisify(execFile);
 
-const DEFAULT_WALL_HEIGHT = 10.0; 
-
-// --- MAIN CONVERTER FUNCTION ---
-export async function runCppConverter(fragments: any[]) {
-  // 1. Verify Executable Exists
-  try {
-    await fs.access(EXE_PATH);
-  } catch {
-    console.error(`[Bridge] CRITICAL: EXE not found at ${EXE_PATH}`);
-    console.error(`[Bridge] Please compile 'main.cpp' and place 'MiningMesher.exe' in the 'bin' folder.`);
-    return null;
-  }
-
-  // 2. Validate Input Data
-  if (!Array.isArray(fragments) || fragments.length === 0) {
-    console.error("[Bridge] No fragments provided to converter");
-    return null;
-  }
-
-  // 3. Build Payload
-  // This transforms your database objects into the JSON format expected by main.cpp
-  const payload = fragments.flatMap((item) => {
-    const rawProperties = item.properties || {};
-    
-    // Attempt to find vertices in various common formats
-    let basePoints: number[][] = 
-      rawProperties.FlattenedVertices || 
-      rawProperties.Vertices || 
-      (rawProperties.StartPoint && rawProperties.EndPoint 
-        ? [rawProperties.StartPoint, rawProperties.EndPoint] 
-        : []);
-
-    // Skip invalid geometry
-    if (!basePoints || basePoints.length < 2) return [];
-
-    const height = rawProperties.Thickness || DEFAULT_WALL_HEIGHT;
-    // Use the Z of the first point as the base elevation
-    const zBase = basePoints[0]?.[2] || 0;
-    const partType = item.partType || rawProperties.Type || "Wall";
-
-    // --- CRITICAL FIX: ISOLATION LOGIC ---
-    // 1. Use the SAME layer for "Floor" and "Roof" so they are grouped together.
-    // 2. Append the ID to the BlockName to force main.cpp to treat this object individually.
-    //    This prevents it from trying to stitch "Wall A" to "Wall B" horizontally.
-    const commonLayer = item.layer || rawProperties.Layer || "DefaultLayer"; 
-    const uniqueBlockName = `${item.blockName || "Default"}_${item.id}`;
-
-    return [
-      {
-        "ViaName": item.viaName || "Unknown",
-        "BlockName": uniqueBlockName, 
-        "Layer": commonLayer,         
-        "Type": "Floor",              // Bottom Slice
-        "PartType": partType,
-        "FlattenedVertices": basePoints.map(p => [p[0], p[1], zBase]),
-        "FragmentId": item.id || 0
-      },
-      {
-        "ViaName": item.viaName || "Unknown",
-        "BlockName": uniqueBlockName, 
-        "Layer": commonLayer,         
-        "Type": "Roof",               // Top Slice
-        "PartType": partType,
-        "FlattenedVertices": basePoints.map(p => [p[0], p[1], zBase + height]),
-        "FragmentId": item.id || 0
-      }
-    ];
-  });
-
-  if (payload.length === 0) {
-    console.error("[Bridge] No valid geometry data extracted from fragments.");
-    return null;
-  }
-
-  console.log(`[Bridge] Processing ${fragments.length} fragments into ${payload.length} slices...`);
-
-  // 4. Run C++ Converter
-  const uniqueId = crypto.randomUUID();
-  const tempDir = os.tmpdir();
-  const inputPath = path.join(tempDir, `input_${uniqueId}.json`);
-  const outputPath = path.join(tempDir, `output_${uniqueId}.obj`);
+export async function runCppConverter(cadData: any[]) {
+  const reqId = crypto.randomUUID();
+  const tmpDir = path.join(process.cwd(), "tmp");
+  const inPath = path.join(tmpDir, `input_${reqId}.json`);
+  const outPath = path.join(tmpDir, `output_${reqId}.obj`);
+  
+  // Point to the compiled binary inside your Next.js project
+  const exeName = process.platform === "win32" ? "MiningMesher.exe" : "MiningMesher";
+  const exePath = path.join(process.cwd(), "bin", exeName);
 
   try {
-    // Write JSON input file
-    await fs.writeFile(inputPath, JSON.stringify(payload, null, 2));
-    
-    // Execute the binary
-    await new Promise<void>((resolve, reject) => {
-      execFile(EXE_PATH, [inputPath, outputPath], { cwd: BIN_DIR }, (error, stdout, stderr) => {
-        if (error) {
-          console.error("[Bridge] C++ Execution Error:", stderr);
-          console.log("[Bridge] Stdout:", stdout);
-          reject(error);
-        } else {
-          // console.log("[Bridge] C++ Conversion Success");
-          resolve();
+    // 1. Prepare temporary directory
+    await fs.mkdir(tmpDir, { recursive: true });
+
+    // 2. Clean duplicate consecutive vertices (Ported from server.js)
+    const processedData = cadData.map(obj => {
+      const properties = obj.properties || obj; // Handle nested properties
+      if (properties.FlattenedVertices && Array.isArray(properties.FlattenedVertices)) {
+        const cleaned = [properties.FlattenedVertices[0]]; 
+        for (let i = 1; i < properties.FlattenedVertices.length; i++) {
+          const curr = properties.FlattenedVertices[i];
+          const prev = properties.FlattenedVertices[i - 1];
+          if (curr[0] !== prev[0] || curr[1] !== prev[1] || curr[2] !== prev[2]) {
+            cleaned.push(curr);
+          }
         }
-      });
+        return { ...properties, FlattenedVertices: cleaned };
+      }
+      return properties;
     });
 
-    // Read the resulting OBJ file
-    const rawObj = await fs.readFile(outputPath, "utf-8");
+    // 3. Write data to a temporary JSON file for C++ to read
+    await fs.writeFile(inPath, JSON.stringify(processedData));
 
-    // Cleanup temporary files
-    await Promise.all([
-      fs.unlink(inputPath).catch(() => {}),
-      fs.unlink(outputPath).catch(() => {})
-    ]);
+    // 4. Execute the C++ Binary
+    console.log(`[Bridge] Executing C++ Mesher for ${processedData.length} fragments...`);
+    await execFileAsync(exePath, [inPath, outPath]);
 
-    // Parse OBJ text into JSON for the frontend
-    return parseObjToJSON(rawObj);
+    // 5. Read the resulting OBJ file generated by C++
+    const objContent = await fs.readFile(outPath, "utf8");
 
-  } catch (error) {
-    console.error("[Bridge] Processing Error:", error);
-    // Attempt cleanup even on error
-    try {
-        await fs.unlink(inputPath).catch(() => {});
-        await fs.unlink(outputPath).catch(() => {});
-    } catch {}
-    return null;
-  }
-}
+    // 6. Parse OBJ into flat arrays for Database/Three.js compatibility
+    const vertices: number[] = [];
+    const indices: number[] = [];
+    const lines = objContent.split("\n");
 
-// --- HELPER: OBJ PARSER ---
-// Converts standard .obj text format into a simple JSON { vertices, indices } object
-function parseObjToJSON(objString: string) {
-  const lines = objString.split('\n');
-  const vertices: number[] = [];
-  const indices: number[] = [];
-
-  for (const line of lines) {
-    const parts = line.trim().split(/\s+/);
-    
-    // Parse Vertex: "v 1.0 2.0 3.0"
-    if (parts[0] === 'v' && parts.length >= 4) {
-      vertices.push(parseFloat(parts[1]), parseFloat(parts[2]), parseFloat(parts[3]));
-    } 
-    // Parse Face: "f 1 2 3" or "f 1/1/1 2/2/2 3/3/3"
-    else if (parts[0] === 'f' && parts.length >= 4) {
-      // OBJ indices are 1-based, convert to 0-based
-      const indices1 = parseInt(parts[1].split('/')[0]) - 1;
-      const indices2 = parseInt(parts[2].split('/')[0]) - 1;
-      const indices3 = parseInt(parts[3].split('/')[0]) - 1;
-      
-      indices.push(indices1, indices2, indices3);
-      
-      // Handle Quads (convert to two triangles: 1-2-3 and 1-3-4)
-      if (parts.length === 5) { 
-        const indices4 = parseInt(parts[4].split('/')[0]) - 1;
-        indices.push(indices1, indices3, indices4);
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/);
+      if (parts[0] === "v") {
+        vertices.push(parseFloat(parts[1]), parseFloat(parts[2]), parseFloat(parts[3]));
+      } else if (parts[0] === "f") {
+        // OBJ indices are 1-based, WebGL/Three.js expects 0-based
+        indices.push(parseInt(parts[1]) - 1, parseInt(parts[2]) - 1, parseInt(parts[3]) - 1);
       }
     }
-  }
 
-  // Return null if empty, otherwise return the mesh data
-  return vertices.length > 0 ? { vertices, indices } : null;
+    console.log(`[Bridge] Success: Parsed ${vertices.length / 3} vertices and ${indices.length / 3} faces.`);
+    
+    // Return the clean data structure expected by block_meshes table
+    return { vertices, indices };
+
+  } catch (error) {
+    console.error("[Bridge] C++ Execution Error:", error);
+    return null;
+  } finally {
+    // 7. Always clean up temporary files so your server disk doesn't get full
+    await fs.unlink(inPath).catch(() => {});
+    await fs.unlink(outPath).catch(() => {});
+  }
 }

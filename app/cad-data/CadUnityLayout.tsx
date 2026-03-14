@@ -3,7 +3,8 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { generateBatch3DModel, deleteMap } from "@/app/actions"; // Ensure generateBatch3DModel is imported
+// Make sure to import BOTH generate actions here
+import { generateBatch3DModel, generate3DModel, deleteMap } from "@/app/actions"; 
 import MineMap from "@/components/MineMap";
 import SurfaceViewer3D from "@/components/SurfaceViewer3D";
 
@@ -50,11 +51,12 @@ const ResizeHandle = ({ onDrag, vertical = false }: { onDrag: (delta: number) =>
 };
 
 // --- MAIN LAYOUT ---
-export default function CadUnityLayout({ initialData }: { initialData: any[] }) {
+// Note: initialData is now a single map object containing the nested tree
+export default function CadUnityLayout({ initialData }: { initialData: any }) {
   const router = useRouter();
 
   // --- DATA STATE ---
-  const [data, setData] = useState<any[]>(initialData);
+  const [mapData, setMapData] = useState<any>(initialData);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [sceneMeshes, setSceneMeshes] = useState<any[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -66,9 +68,41 @@ export default function CadUnityLayout({ initialData }: { initialData: any[] }) 
   const [rightWidth, setRightWidth] = useState(280);
   const [sceneHeight, setSceneHeight] = useState(500); 
 
-  useEffect(() => { setData(initialData); }, [initialData]);
+  // Keep state synced if server data changes
+  useEffect(() => { 
+    setMapData(initialData); 
+    
+    // Automatically load any saved database meshes into the 3D viewer on load
+    const savedMeshes: any[] = [];
+    if (initialData?.vias) {
+      initialData.vias.forEach((via: any) => {
+        via.blocks.forEach((block: any) => {
+          if (block.mesh) savedMeshes.push({ ...block.mesh, id: `db-mesh-${block.id}` });
+        });
+      });
+    }
+    setSceneMeshes(savedMeshes);
+  }, [initialData]);
 
   const handleRefresh = () => router.refresh();
+
+  // --- FLATTEN DATA FOR VIEWERS ---
+  // The 2D Map expects a flat list of lines. We extract them from the tree here.
+  const allLines = useMemo(() => {
+    if (!mapData || !mapData.vias) return [];
+    const lines: any[] = [];
+    mapData.vias.forEach((via: any) => {
+      via.blocks.forEach((block: any) => {
+        if (block.lines) {
+          block.lines.forEach((line: any) => {
+             // Attach parent names just in case the UI needs to display them
+            lines.push({ ...line, viaName: via.name, blockName: block.name });
+          });
+        }
+      });
+    });
+    return lines;
+  }, [mapData]);
 
   // --- HIERARCHY LOGIC ---
   const toggleExpand = (id: string) => {
@@ -80,69 +114,52 @@ export default function CadUnityLayout({ initialData }: { initialData: any[] }) 
     });
   };
 
-  const hierarchy = useMemo(() => {
-    const tree: Record<string, Record<string, any[]>> = {};
-    data.forEach((item) => {
-      if (item.isPlaceholder) return; // Skip placeholder items if map is empty
-      const vName = item.viaName || "Unknown Vỉa";
-      const bName = item.blockName || "Unknown Khối";
-      if (!tree[vName]) tree[vName] = {};
-      if (!tree[vName][bName]) tree[vName][bName] = [];
-      tree[vName][bName].push(item);
-    });
-    return tree;
-  }, [data]);
-
   // --- ACTION: DELETE PROJECT ---
   const handleDeleteProject = async () => {
-    if (!confirm("Are you sure you want to delete this ENTIRE project? This cannot be undone.")) {
-      return;
-    }
+    if (!confirm("Are you sure you want to delete this ENTIRE project? This cannot be undone.")) return;
+    
     setIsDeleting(true);
+    if (mapData?.id) {
+      const res = await deleteMap(mapData.id);
+      if (res.success) router.push("/");
+      else alert("Error deleting map. Check console.");
+    }
+    setIsDeleting(false);
+  };
 
-    const currentMapId = data[0]?.mapId; 
-
-    if (currentMapId) {
-      const res = await deleteMap(currentMapId);
-      if (res.success) {
-        router.push("/");
+  // --- ACTION: GENERATE SINGLE BLOCK (PERMANENT) ---
+  const handleGenerateBlock = async (e: React.MouseEvent, blockId: number) => {
+    e.stopPropagation(); // Prevent expanding the folder
+    setIsProcessing(true);
+    try {
+      const result = await generate3DModel(blockId);
+      if (result.success) {
+         // Refresh the page to pull the newly saved mesh from the database
+         router.refresh(); 
       } else {
-        alert("Error deleting map. Check console.");
-        setIsDeleting(false);
+         alert("Failed to generate Block: " + result.error);
       }
-    } else {
-      alert("Cannot determine Map ID.");
-      setIsDeleting(false);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
-  // --- ACTION: GENERATE 3D (BATCH) ---
+  // --- ACTION: GENERATE BATCH (TEMPORARY PREVIEW) ---
   const handleGenerateMultiple = async () => {
     if (selectedIds.size === 0) return;
     setIsProcessing(true);
-    
     try {
-      // 1. Convert Selection to Array
       const idsToProcess = Array.from(selectedIds);
-
-      // 2. Send BATCH to Server Action
-      // (This connects to C++ which stitches them together)
       const result = await generateBatch3DModel(idsToProcess);
-
       if (result.success && result.mesh) {
-        // 3. Update Scene with the single combined mesh
-        const combinedMesh = {
-          ...result.mesh,
-          id: `batch-${Date.now()}` // Unique ID for React key
-        };
-        setSceneMeshes([combinedMesh]);
+        setSceneMeshes(prev => [...prev, { ...result.mesh, id: `batch-${Date.now()}` }]);
       } else {
-        console.error("Batch Gen Error:", result.error);
-        alert("Failed to generate 3D model. " + (result.error || ""));
+        alert("Batch Gen Error: " + (result.error || ""));
       }
     } catch (error) {
-      console.error("Client Error:", error);
-      alert("An unexpected error occurred.");
+      console.error(error);
     } finally {
       setIsProcessing(false);
     }
@@ -165,13 +182,12 @@ export default function CadUnityLayout({ initialData }: { initialData: any[] }) 
   }, []);
 
   const handleSelectAll = () => {
-    const validItems = data.filter(d => !d.isPlaceholder);
-    if (selectedIds.size === validItems.length && validItems.length > 0) setSelectedIds(new Set());
-    else setSelectedIds(new Set(validItems.map(d => d.id)));
+    if (selectedIds.size === allLines.length && allLines.length > 0) setSelectedIds(new Set());
+    else setSelectedIds(new Set(allLines.map(d => d.id)));
   };
 
   const singleSelectedItem = selectedIds.size === 1 
-    ? data.find(d => d.id === Array.from(selectedIds)[0]) 
+    ? allLines.find(d => d.id === Array.from(selectedIds)[0]) 
     : null;
 
   return (
@@ -184,7 +200,7 @@ export default function CadUnityLayout({ initialData }: { initialData: any[] }) 
             &larr; Hub
           </Link>
           <span className="text-gray-700">|</span>
-          <span className="text-blue-500">♦</span> {data[0]?.properties?.OriginalMapName || data[0]?.viaName || (data[0]?.isPlaceholder ? "Empty Map" : "Mine Viewer")}
+          <span className="text-blue-500">♦</span> {mapData?.name || "Empty Map"}
         </div>
         
         <div className="flex gap-2">
@@ -208,78 +224,74 @@ export default function CadUnityLayout({ initialData }: { initialData: any[] }) 
         
         {/* LEFT PANE (HIERARCHY) */}
         <div style={{ width: leftWidth }} className="bg-[#1a1a1a] flex flex-col shrink-0 min-w-[150px] border-r border-black select-none">
-          {/* Top Bar */}
           <div className="p-2 flex justify-between items-center bg-[#222] border-b border-black">
             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Hierarchy</span>
             <button onClick={handleSelectAll} className="text-[10px] text-blue-400 hover:text-blue-300">
-              {selectedIds.size > 0 && selectedIds.size === data.length ? "Deselect" : "Select All"}
+              {selectedIds.size > 0 && selectedIds.size === allLines.length ? "Deselect" : "Select All"}
             </button>
           </div>
 
-          {/* List */}
           <div className="flex-1 overflow-y-auto p-1 scrollbar-thin scrollbar-thumb-gray-800 font-sans">
-            {Object.entries(hierarchy).map(([viaName, blocks]) => {
-              const isViaOpen = expanded.has(viaName);
+            {/* NEW RENDER LOOP USING REAL DATABASE TREE */}
+            {mapData?.vias?.map((via: any) => {
+              const viaKey = `via-${via.id}`;
+              const isViaOpen = expanded.has(viaKey);
               
               return (
-                <div key={viaName} className="mb-0.5">
+                <div key={viaKey} className="mb-0.5">
                   {/* LEVEL 1: VIA */}
-                  <div 
-                    onClick={() => toggleExpand(viaName)}
-                    className="flex items-center gap-1 px-1 py-1 cursor-pointer hover:bg-[#2a2a2a] text-[11px] font-bold text-blue-400"
-                  >
+                  <div onClick={() => toggleExpand(viaKey)} className="flex items-center gap-1 px-1 py-1 cursor-pointer hover:bg-[#2a2a2a] text-[11px] font-bold text-blue-400">
                     <span className={`transform transition-transform ${isViaOpen ? 'rotate-90' : ''}`}>▶</span>
-                    <span className="opacity-70">📂</span> {viaName}
+                    <span className="opacity-70">📂</span> {via.name}
                   </div>
 
                   {isViaOpen && (
                     <div className="ml-3 border-l border-gray-800">
-                      {Object.entries(blocks).map(([blockName, items]) => {
-                        const blockKey = `${viaName}-${blockName}`;
+                      {via.blocks?.map((block: any) => {
+                        const blockKey = `block-${block.id}`;
                         const isBlockOpen = expanded.has(blockKey);
-                        const allItemsSelected = items.length > 0 && items.every(i => selectedIds.has(i.id));
+                        const hasDbMesh = !!block.mesh; // Check if DB has a mesh for this block
+                        const allBlockItemsSelected = block.lines?.length > 0 && block.lines.every((i: any) => selectedIds.has(i.id));
 
                         return (
-                          <div key={blockName} className="mb-0.5">
+                          <div key={blockKey} className="mb-0.5">
                             {/* LEVEL 2: BLOCK */}
-                            <div 
-                              onClick={() => toggleExpand(blockKey)}
-                              className={`
-                                flex items-center gap-1 px-1 py-1 cursor-pointer text-[10px] font-semibold group
-                                ${allItemsSelected ? "text-yellow-500" : "text-gray-400 hover:text-gray-200"}
-                              `}
-                            >
+                            <div onClick={() => toggleExpand(blockKey)} className={`flex items-center gap-1 px-1 py-1 cursor-pointer text-[10px] font-semibold group ${allBlockItemsSelected ? "text-yellow-500" : "text-gray-400 hover:text-gray-200"}`}>
                               <span className={`transform transition-transform ${isBlockOpen ? 'rotate-90' : ''}`}>▶</span>
-                              <span className="opacity-70">📦</span> {blockName}
+                              <span className="opacity-70">📦</span> {block.name}
                               
+                              {/* Dedicated Block Generation Button */}
+                              <button 
+                                onClick={(e) => handleGenerateBlock(e, block.id)}
+                                className={`ml-auto text-[8px] px-1.5 py-0.5 rounded transition-colors ${hasDbMesh ? 'bg-green-900/50 text-green-400 border border-green-800' : 'bg-blue-900 text-blue-200 opacity-0 group-hover:opacity-100 hover:bg-blue-700'}`}
+                              >
+                                {hasDbMesh ? "✓ 3D" : "Gen 3D"}
+                              </button>
+
                               <button 
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  const ids = new Set(items.map(i => i.id));
-                                  handleMultiSelect(ids, allItemsSelected ? "replace" : "add");
+                                  handleMultiSelect(new Set(block.lines.map((i:any) => i.id)), allBlockItemsSelected ? "replace" : "add");
                                 }}
-                                className="ml-auto opacity-0 group-hover:opacity-100 text-[8px] bg-[#333] px-1 rounded text-white hover:bg-[#555]"
+                                className="ml-1 opacity-0 group-hover:opacity-100 text-[8px] bg-[#333] px-1 rounded text-white hover:bg-[#555]"
                               >
-                                {allItemsSelected ? "−" : "+"}
+                                {allBlockItemsSelected ? "−" : "+"}
                               </button>
                             </div>
 
                             {isBlockOpen && (
                               <div className="ml-3 border-l border-gray-800">
-                                {/* LEVEL 3: ITEMS */}
-                                {items.map((item) => {
-                                  const isSelected = selectedIds.has(item.id);
+                                {/* LEVEL 3: CAD LINES */}
+                                {block.lines?.map((line: any) => {
+                                  const isSelected = selectedIds.has(line.id);
                                   return (
                                     <div 
-                                      key={item.id}
-                                      onClick={(e) => handleMultiSelect(new Set([item.id]), (e.ctrlKey || e.metaKey) ? "toggle" : "replace")}
-                                      className={`
-                                        cursor-pointer text-[9px] px-2 py-1 flex items-center gap-2 transition-colors
-                                        ${isSelected ? 'bg-blue-600 text-white' : 'hover:bg-[#2a2a2a] text-gray-500'}
-                                      `}
+                                      key={line.id}
+                                      onClick={(e) => handleMultiSelect(new Set([line.id]), (e.ctrlKey || e.metaKey) ? "toggle" : "replace")}
+                                      className={`cursor-pointer text-[9px] px-2 py-1 flex items-center gap-2 transition-colors ${isSelected ? 'bg-blue-600 text-white' : 'hover:bg-[#2a2a2a] text-gray-500'}`}
                                     >
                                       <div className={`w-1 h-1 rounded-full ${isSelected ? 'bg-yellow-400' : 'bg-gray-700'}`}></div>
-                                      <span className="truncate flex-1">{item.partType || "Fragment"}</span>
+                                      <span className="truncate flex-1">{line.partType} ({line.handle})</span>
                                     </div>
                                   );
                                 })}
@@ -294,22 +306,19 @@ export default function CadUnityLayout({ initialData }: { initialData: any[] }) 
               );
             })}
             
-            {/* Empty State in Hierarchy */}
-            {Object.keys(hierarchy).length === 0 && (
-                <div className="p-4 text-center text-xs text-gray-600 italic">
-                    No objects found.
-                </div>
+            {(!mapData?.vias || mapData.vias.length === 0) && (
+                <div className="p-4 text-center text-xs text-gray-600 italic">No objects found.</div>
             )}
           </div>
 
-          {/* GENERATE BUTTON */}
+          {/* GENERATE BATCH PREVIEW BUTTON */}
           <div className="p-2 bg-[#222] border-t border-black">
             <button 
               onClick={handleGenerateMultiple} 
               disabled={isProcessing || selectedIds.size === 0} 
-              className="w-full py-2 rounded text-[10px] font-bold uppercase tracking-widest bg-blue-700 hover:bg-blue-600 text-white disabled:bg-[#333] disabled:text-gray-600 transition-all active:scale-95"
+              className="w-full py-2 rounded text-[10px] font-bold uppercase tracking-widest bg-gray-700 hover:bg-gray-600 text-white disabled:bg-[#333] disabled:text-gray-600 transition-all active:scale-95"
             >
-              {isProcessing ? "Processing..." : `Generate 3D (${selectedIds.size})`}
+              {isProcessing ? "Processing..." : `Preview Batch 3D (${selectedIds.size})`}
             </button>
           </div>
         </div>
@@ -324,13 +333,7 @@ export default function CadUnityLayout({ initialData }: { initialData: any[] }) 
             <div className="absolute top-2 left-2 z-10 bg-black/70 text-gray-400 text-[10px] px-2 py-1 rounded border border-gray-800 pointer-events-none">
               3D SCENE (Left: Select | Right: Orbit)
             </div>
-            
-            {/* 3D VIEWER */}
-            <SurfaceViewer3D 
-              meshes={sceneMeshes} 
-              selectedIds={selectedIds}
-              onMultiSelect={(ids) => handleMultiSelect(ids, "replace")}
-            />
+            <SurfaceViewer3D meshes={sceneMeshes} selectedIds={selectedIds} onMultiSelect={(ids) => handleMultiSelect(ids, "replace")} />
           </div>
 
           <ResizeHandle vertical onDrag={(d) => setSceneHeight(p => Math.max(100, Math.min(window.innerHeight - 200, p + d)))} />
@@ -340,11 +343,7 @@ export default function CadUnityLayout({ initialData }: { initialData: any[] }) 
             <div className="absolute top-2 left-2 z-10 bg-black/70 text-gray-400 text-[10px] px-2 py-1 rounded border border-gray-800 pointer-events-none">
               2D MAP (Left: Select | Middle: Pan)
             </div>
-            <MineMap 
-              data={data.filter(d => !d.isPlaceholder)} 
-              selectedIds={selectedIds} 
-              onMultiSelect={(ids) => handleMultiSelect(ids, "replace")} 
-            />
+            <MineMap data={allLines} selectedIds={selectedIds} onMultiSelect={(ids) => handleMultiSelect(ids, "replace")} />
           </div>
         </div>
 

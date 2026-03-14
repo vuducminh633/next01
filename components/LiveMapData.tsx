@@ -1,7 +1,6 @@
 "use client"; 
-
 import { useState } from "react";
-import { getGeoData } from "@/app/actions"; 
+
 
 // Define the type of your data (simplified for this example)
 type RoadItem = {
@@ -20,16 +19,16 @@ export default function LiveMapData({ initialData }: { initialData: RoadItem[] }
   const [loading, setLoading] = useState(false);
 
   // Function to re-fetch data from the server
-  const handleRefresh = async () => {
-    setLoading(true);
-    try {
-      const newData = await getGeoData();
-      setData(newData);
-    } catch (error) {
-      console.error("Failed to refresh", error);
-    }
-    setLoading(false);
-  };
+  // const handleRefresh = async () => {
+  //   setLoading(true);
+  //   try {
+  //     const newData = await getGeoData();
+  //     setData(newData);
+  //   } catch (error) {
+  //     console.error("Failed to refresh", error);
+  //   }
+  //   setLoading(false);
+  // };
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -37,7 +36,7 @@ export default function LiveMapData({ initialData }: { initialData: RoadItem[] }
       <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
         <h3 className="font-semibold text-gray-700">Live Data ({data.length})</h3>
         <button
-          onClick={handleRefresh}
+       //   onClick={handleRefresh}
           disabled={loading}
           className="px-3 py-1 bg-blue-600 text-white text-xs font-bold rounded hover:bg-blue-700 disabled:opacity-50 transition"
         >

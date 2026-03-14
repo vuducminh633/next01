@@ -8,7 +8,7 @@ import bcrypt from "bcrypt";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   adapter: DrizzleAdapter(db),
-  session: { strategy: "jwt" }, // ⚠️ This handles the "Simple Session Management"
+  session: { strategy: "jwt" }, //  This handles the "Simple Session Management"
   pages: {
     signIn: "/login", // Redirect here if they aren't logged in
   },

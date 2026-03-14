@@ -1,41 +1,42 @@
 "use client";
 
 import { useState } from "react";
-// import { markGroupAsViewed } from "../actions"; // REMOVED to fix build error
 import MeshViewer from "../../components/MeshViewer"; 
 
-// Type matches our Prisma/Drizzle Model
+// 1. UPDATED TYPE: Matches our new cad_lines schema + the flattened tree data
 type CadItem = {
   id: number;
-  groupName: string | null;
   handle: string;
-  objectType: string | null;
+  partType: string | null; // Replaces objectType
   layer: string | null;
   properties: any;
   isNew: boolean;
+  viaName?: string;   // Attached when we flatten the tree
+  blockName?: string; // Attached when we flatten the tree
 };
 
 export default function CadGroupViewer({ data }: { data: CadItem[] }) {
   const [selectedItem, setSelectedItem] = useState<CadItem | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
-  // 1. Group the data by "groupName" (or viaName if preferred)
+  // 2. UPDATED GROUPING: Group by "Vỉa - Khối" instead of the old groupName
   const groupedData = data.reduce((acc, item) => {
-    const group = item.groupName || "Ungrouped";
+    const group = (item.viaName && item.blockName) 
+        ? `${item.viaName} - ${item.blockName}` 
+        : "Ungrouped Objects";
+        
     if (!acc[group]) acc[group] = [];
     acc[group].push(item);
     return acc;
   }, {} as Record<string, CadItem[]>);
 
-  // 2. Toggle Group Expansion
+  // Toggle Group Expansion
   const toggleGroup = async (groupName: string, items: CadItem[]) => {
     const next = new Set(expandedGroups);
-    
     if (next.has(groupName)) {
       next.delete(groupName); // Collapse
     } else {
       next.add(groupName); // Expand
-      // Note: "Mark as viewed" logic removed for now
     }
     setExpandedGroups(next);
   };
@@ -78,7 +79,7 @@ export default function CadGroupViewer({ data }: { data: CadItem[] }) {
                   <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b">
                     <tr>
                       <th className="px-6 py-3">Handle</th>
-                      <th className="px-6 py-3">Type</th>
+                      <th className="px-6 py-3">Part Type</th>
                       <th className="px-6 py-3">Layer</th>
                       <th className="px-6 py-3 text-right">Action</th>
                     </tr>
@@ -92,11 +93,12 @@ export default function CadGroupViewer({ data }: { data: CadItem[] }) {
                       >
                         <td className="px-6 py-3 font-mono text-gray-600">{item.handle}</td>
                         <td className="px-6 py-3">
+                          {/* 3. Render partType instead of objectType */}
                           <span className="inline-block px-2 py-1 rounded border bg-white text-xs text-gray-600">
-                            {item.objectType}
+                            {item.partType || "Unknown"}
                           </span>
                         </td>
-                        <td className="px-6 py-3 text-gray-500">{item.layer}</td>
+                        <td className="px-6 py-3 text-gray-500">{item.layer || "0"}</td>
                         <td className="px-6 py-3 text-right text-blue-600 font-medium hover:underline">View</td>
                       </tr>
                     ))}
@@ -117,7 +119,7 @@ export default function CadGroupViewer({ data }: { data: CadItem[] }) {
              {/* Modal Header */}
              <div className="p-4 border-b flex justify-between items-center bg-gray-50">
                 <h3 className="text-lg font-bold text-gray-800">
-                  {selectedItem.objectType} <span className="text-gray-400 font-normal">#{selectedItem.handle}</span>
+                  {selectedItem.partType || "Geometry"} <span className="text-gray-400 font-normal">#{selectedItem.handle}</span>
                 </h3>
                 <button 
                   onClick={() => setSelectedItem(null)}
@@ -131,19 +133,19 @@ export default function CadGroupViewer({ data }: { data: CadItem[] }) {
                
                {/* Visual Preview */}
                <div className="mb-6 bg-gray-100 border rounded-xl overflow-hidden h-[300px] flex items-center justify-center relative">
-                  {(selectedItem.objectType === "Circle" || selectedItem.objectType === "Arc" || selectedItem.objectType === "Polyline" || selectedItem.objectType === "Line") ? (
-                      <div className="w-full h-full">
-                        <MeshViewer 
-                          type={selectedItem.objectType as any} 
-                          data={selectedItem.properties} 
-                        />
-                      </div>
-                  ) : (
-                      <div className="text-gray-400 text-sm flex flex-col items-center gap-2">
-                        <span>🚫</span>
-                        <span>No visual preview available for {selectedItem.objectType}</span>
-                      </div>
-                  )}
+                 {/* 4. Use the raw object type from properties if MeshViewer needs it */}
+                 {selectedItem.properties?.ObjectType ? (
+                     <div className="w-full h-full">
+                       <MeshViewer 
+                         type={selectedItem.properties.ObjectType as any} 
+                         data={selectedItem.properties} 
+                       />
+                     </div>
+                 ) : (
+                     <div className="text-gray-400 text-sm flex flex-col items-center gap-2">
+                       <span>No visual preview available</span>
+                     </div>
+                 )}
                </div>
 
                {/* Raw Data View */}
