@@ -66,7 +66,10 @@ export default function CadUnityLayout({ initialData }: { initialData: any }) {
   // --- UI STATE (Resizable Panes) ---
   const [leftWidth, setLeftWidth] = useState(260); 
   const [rightWidth, setRightWidth] = useState(280);
-  const [sceneHeight, setSceneHeight] = useState(500); 
+ 
+  //state for 2d map
+  const [isMapExpanded, setIsMapExpanded] = useState(true);
+  const [mapHeight, setMapHeight] = useState(300);
 
   // Keep state synced if server data changes
   useEffect(() => { 
@@ -77,7 +80,7 @@ export default function CadUnityLayout({ initialData }: { initialData: any }) {
     if (initialData?.vias) {
       initialData.vias.forEach((via: any) => {
         via.blocks.forEach((block: any) => {
-          if (block.mesh) savedMeshes.push({ ...block.mesh, id: `db-mesh-${block.id}` });
+          if (block.mesh) savedMeshes.push({ ...block.mesh, id: block.id });
         });
       });
     }
@@ -146,15 +149,26 @@ export default function CadUnityLayout({ initialData }: { initialData: any }) {
     }
   };
 
-  // --- ACTION: GENERATE BATCH (TEMPORARY PREVIEW) ---
   const handleGenerateMultiple = async () => {
+
+    console.log("DEBUG: Checking Action Type:", typeof generateBatch3DModel);
+  console.log("DEBUG: Action Details:", generateBatch3DModel);
+    console.log("--- BATCH ACTION STARTED ---");
+  
+  // LOG 2: Check exactly what the selection state is
+  console.log("Current Selected Count:", selectedIds.size);
+  console.log("Current Selected IDs:", Array.from(selectedIds));
+
+
     if (selectedIds.size === 0) return;
     setIsProcessing(true);
     try {
       const idsToProcess = Array.from(selectedIds);
+      // LOG 3: Right before the network call
+    console.log("Attemping Server Action call with:", idsToProcess);
       const result = await generateBatch3DModel(idsToProcess);
       if (result.success && result.mesh) {
-        setSceneMeshes(prev => [...prev, { ...result.mesh, id: `batch-${Date.now()}` }]);
+        setSceneMeshes(prev => [...prev, { ...result.mesh, id: Date.now()}]);
       } else {
         alert("Batch Gen Error: " + (result.error || ""));
       }
@@ -325,53 +339,88 @@ export default function CadUnityLayout({ initialData }: { initialData: any }) {
 
         <ResizeHandle onDrag={(d) => setLeftWidth(p => Math.max(150, Math.min(600, p + d)))} />
 
-        {/* CENTER PANE (Vertical Split) */}
-        <div className="flex-1 flex flex-col min-w-0 bg-[#0a0a0a]">
-          
-          {/* TOP: 3D Scene */}
-          <div style={{ height: sceneHeight }} className="relative overflow-hidden min-h-[100px]">
-            <div className="absolute top-2 left-2 z-10 bg-black/70 text-gray-400 text-[10px] px-2 py-1 rounded border border-gray-800 pointer-events-none">
-              3D SCENE (Left: Select | Right: Orbit)
-            </div>
-            <SurfaceViewer3D meshes={sceneMeshes} selectedIds={selectedIds} onMultiSelect={(ids) => handleMultiSelect(ids, "replace")} />
+{/* CENTER PANE (100% 3D Scene) */}
+        <div className="flex-1 relative bg-[#0a0a0a] min-w-0">
+          <div className="absolute top-2 left-2 z-10 bg-black/70 text-gray-400 text-[10px] px-2 py-1 rounded border border-gray-800 pointer-events-none">
+            3D SCENE (Left: Select | Right: Orbit)
           </div>
-
-          <ResizeHandle vertical onDrag={(d) => setSceneHeight(p => Math.max(100, Math.min(window.innerHeight - 200, p + d)))} />
-
-          {/* BOTTOM: 2D Map */}
-          <div className="flex-1 relative overflow-hidden min-h-[100px]">
-            <div className="absolute top-2 left-2 z-10 bg-black/70 text-gray-400 text-[10px] px-2 py-1 rounded border border-gray-800 pointer-events-none">
-              2D MAP (Left: Select | Middle: Pan)
-            </div>
-            <MineMap data={allLines} selectedIds={selectedIds} onMultiSelect={(ids) => handleMultiSelect(ids, "replace")} />
+          {/* The 3D viewer now naturally fills the entire center area */}
+          <div className="absolute inset-0">
+            <SurfaceViewer3D meshes={sceneMeshes} selectedIds={selectedIds} onMultiSelect={(ids) => handleMultiSelect(ids, "replace")} />
           </div>
         </div>
 
-        <ResizeHandle onDrag={(d) => setRightWidth(p => Math.max(200, Math.min(500, p - d)))} />
+        <ResizeHandle onDrag={(d) => setRightWidth(p => Math.max(200, Math.min(600, p - d)))} />
 
-        {/* RIGHT PANE (INSPECTOR) */}
+{/* RIGHT PANE (INSPECTOR + 2D MAP) */}
         <div style={{ width: rightWidth }} className="bg-[#1a1a1a] flex flex-col shrink-0 border-l border-black">
-          <div className="p-2 text-[10px] font-bold text-gray-400 uppercase bg-[#222] border-b border-black">Inspector</div>
-          <div className="flex-1 p-4 overflow-y-auto">
-            {selectedIds.size === 0 ? (
-              <div className="text-center text-gray-600 text-xs mt-10">No Selection</div>
-            ) : selectedIds.size > 1 ? (
-              <div className="text-white text-xs space-y-2">
-                <div className="font-bold text-blue-400">{selectedIds.size} Items Selected</div>
-                <div className="text-[10px] text-gray-500">Select single item to view properties</div>
-              </div>
-            ) : singleSelectedItem ? (
-              <div className="space-y-3">
-                  <div className="border-b border-gray-700 pb-2">
-                      <div className="text-xs font-bold text-white">{singleSelectedItem.partType || "Object"}</div>
-                      <div className="text-[10px] text-gray-500">ID: {singleSelectedItem.handle}</div>
-                  </div>
-                  <pre className="text-[9px] text-green-500 overflow-auto bg-[#111] p-2 rounded border border-gray-800">
-                    {JSON.stringify(singleSelectedItem.properties, null, 2)}
-                  </pre>
-              </div>
-            ) : null}
+          
+          {/* TOP HALF: INSPECTOR - fills remaining space (flex-1) */}
+          <div className="flex flex-col flex-1 min-h-0">
+            <div className="p-2 text-[10px] font-bold text-gray-400 uppercase bg-[#222] border-b border-black shrink-0">
+              Inspector
+            </div>
+            <div className="flex-1 p-4 overflow-y-auto">
+              {selectedIds.size === 0 ? (
+                <div className="text-center text-gray-600 text-xs mt-10">No Selection</div>
+              ) : selectedIds.size > 1 ? (
+                <div className="text-white text-xs space-y-2">
+                  <div className="font-bold text-blue-400">{selectedIds.size} Items Selected</div>
+                  <div className="text-[10px] text-gray-500">Select single item to view properties</div>
+                </div>
+              ) : singleSelectedItem ? (
+                <div className="space-y-3">
+                    <div className="border-b border-gray-700 pb-2">
+                        <div className="text-xs font-bold text-white">{singleSelectedItem.partType || "Object"}</div>
+                        <div className="text-[10px] text-gray-500">ID: {singleSelectedItem.handle}</div>
+                    </div>
+                    <pre className="text-[9px] text-green-500 overflow-auto bg-[#111] p-2 rounded border border-gray-800">
+                      {JSON.stringify(singleSelectedItem.properties, null, 2)}
+                    </pre>
+                </div>
+              ) : null}
+            </div>
           </div>
+
+          {/* BOTTOM HALF: UNITY-STYLE 2D MAP DROPDOWN with Resizer */}
+          <div className="flex flex-col shrink-0 border-t border-black bg-[#1a1a1a]">
+            
+            {/* The new vertical resize handle - it only appears when the map is expanded */}
+            {isMapExpanded && (
+              <ResizeHandle 
+                vertical 
+                // As you noted, the existing ResizeHandle is generic, so we're reusing it.
+                // When dragging *down* (positive movementY), we want to make the map shorter, 
+                // and when dragging *up* (negative movementY), we want to make it taller.
+                // So the logic is height = prev - deltaY.
+                onDrag={(d) => setMapHeight(prev => Math.max(100, Math.min(800, prev - d)))} // Limits between 100px and 800px
+              />
+            )}
+
+            {/* The Dropdown Button */}
+            <button 
+              onClick={() => setIsMapExpanded(!isMapExpanded)}
+              className="p-2 text-[10px] font-bold text-gray-400 uppercase bg-[#222] hover:bg-[#333] border-b border-black flex items-center gap-2 w-full text-left transition-colors cursor-pointer"
+            >
+              <span className={`transform transition-transform text-xs ${isMapExpanded ? 'rotate-90' : ''}`}>
+                ▶
+              </span>
+              2D Map Preview
+            </button>
+            
+            {/* The Collapsible Content with resizable height */}
+            {isMapExpanded && (
+              <div style={{ height: mapHeight }} className="relative bg-[#0a0a0a]">
+                <div className="absolute top-2 left-2 z-10 bg-black/70 text-gray-400 text-[10px] px-2 py-1 rounded border border-gray-800 pointer-events-none">
+                  2D MAP
+                </div>
+                <div className="absolute inset-0">
+                  <MineMap data={allLines} selectedIds={selectedIds} onMultiSelect={(ids) => handleMultiSelect(ids, "replace")} />
+                </div>
+              </div>
+            )}
+          </div>
+
         </div>
       </div>
     </div>

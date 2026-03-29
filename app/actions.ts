@@ -235,28 +235,25 @@ export async function getMapObjects(mapId: number) {
 // --- 3D GENERATION STUB ---
 export async function generate3DModel(blockId: number) {
   try {
-    // 1. Fetch ALL fragments (Vách/Trụ) belonging directly to this Block
-    const fragments = await db
-      .select()
-      .from(cadLines)
-      .where(eq(cadLines.blockId, blockId));
+    console.log(`\n--- [Server] STARTING 3D GEN FOR BLOCK ID: ${blockId} ---`);
+    
+    console.log("[Server] 1. Fetching CAD fragments from database...");
+    const fragments = await db.select().from(cadLines).where(eq(cadLines.blockId, blockId));
 
     if (!fragments || fragments.length === 0) {
+      console.log("[Server] Error: No fragments found in database for this block.");
       return { error: "No fragments found in this block." };
     }
 
-    console.log(`[Server] Stitching ${fragments.length} fragments for Block ID: ${blockId}`);
-    
-    //  Pass the ENTIRE fragments array to the C++ converter for stitching
+    console.log(`[Server] 2. Found ${fragments.length} fragments! Passing to C++ Bridge...`);
     const mesh = await runCppConverter(fragments);
-    
+
     if (!mesh) {
-      console.error(`[Server] C++ conversion failed`);
+      console.error(`[Server] 3. Error: C++ Bridge failed to return a mesh.`);
       return { error: "C++ conversion failed." };
     }
 
-    //  Save the resulting 3D Model into the dedicated block_meshes table
-    // We use onConflictDoUpdate so if you click "Generate" again, it overwrites the old mesh instead of crashing.
+    console.log(`[Server] 3. Mesh generated successfully! Saving to database...`);
     await db.insert(blockMeshes)
       .values({
         blockId: blockId,
@@ -264,20 +261,16 @@ export async function generate3DModel(blockId: number) {
         indices: mesh.indices,
       })
       .onConflictDoUpdate({
-        target: blockMeshes.blockId, // The unique constraint we set in schema.ts
-        set: {
-          vertices: mesh.vertices,
-          indices: mesh.indices,
-        }
+        target: blockMeshes.blockId, 
+        set: { vertices: mesh.vertices, indices: mesh.indices }
       });
 
-    console.log(`[Server] Successfully saved 3D Mesh for Block ID: ${blockId}`);
-
+    console.log(`[Server] 4. Save successful! Refreshing UI...`);
     revalidatePath("/", "layout");
     return { success: true, mesh, fragmentCount: fragments.length };
 
-  } catch (error) {
-    console.error("[Server] Generate 3D Error:", error);
+  } catch (error: any) {
+    console.error("\n[Server] 3D GENERATION ERROR:", error.message || error);
     return { error: "Server error during 3D generation." };
   }
 }
@@ -285,10 +278,6 @@ export async function generate3DModel(blockId: number) {
 export async function deleteMap(mapId: number) {
   try {
     console.log(`[Server] Deleting Map ID: ${mapId}`);
-
-    // Because we set 'onDelete: "cascade"' in schema.ts, 
-    // deleting the Map automatically triggers PostgreSQL to delete 
-    // all connected Vias, Blocks, CAD Lines, and Meshes instantly!
     await db.delete(maps).where(eq(maps.id, mapId));
 
     // Revalidate to remove the card from the Hub immediately
@@ -300,36 +289,46 @@ export async function deleteMap(mapId: number) {
     return { success: false, error: "Failed to delete project" };
   }
 }
-  export async function generateBatch3DModel(lineIds: number[]) {
-      try {
-        if (lineIds.length === 0) return { error: "No IDs provided" };
-    
-        // Fetch ALL selected CAD lines at once using the new table
-        const items = await db
-          .select()
-          .from(cadLines)
-          .where(inArray(cadLines.id, lineIds));
-    
-        if (items.length === 0) return { error: "No items found" };
-    
-        //  Send the WHOLE BATCH to the C++ Converter
-        const mesh = await runCppConverter(items);
-    
-        if (!mesh) {
-            return { error: "Converter returned empty mesh" };
-        }
-    
-        // Return the combined mesh
-        // As you noted, we just return this for a temporary UI preview. 
-        // We don't save it to the DB because it's a custom batch, not a strict Khối.
-        return { success: true, mesh };
-    
-      } catch (e) {
-        console.error("Batch Gen Error:", e);
-        return { error: "Server Error during batch generation" };
-      }
+export async function generateBatch3DModel(lineIds: number[]) {
+  process.stdout.write(`\n\n>>> CRITICAL: SERVER RECEIVED CALL FOR ${lineIds.length} IDs <<<\n\n`);
+  try {
+    console.log(`\n--- [Server] STARTING BATCH 3D GEN FOR ${lineIds?.length} IDs ---`);
+
+    if (!lineIds || lineIds.length === 0) {
+      console.log("[Server] Error: No IDs provided in the array.");
+      return { error: "No IDs provided" };
     }
 
+    console.log("[Server] 1. Fetching CAD lines from PostgreSQL...");
+    // Fetch ALL selected CAD lines at once using the new table
+    const items = await db
+      .select()
+      .from(cadLines)
+      .where(inArray(cadLines.id, lineIds));
+
+    console.log(`[Server] 2. Found ${items.length} items in DB matching those IDs.`);
+    
+    if (items.length === 0) {
+      console.log("[Server] Error: Database returned 0 items.");
+      return { error: "No items found" };
+    }
+
+    console.log("[Server] 3. Sending batch to C++ Converter...");
+    const mesh = await runCppConverter(items);
+
+    if (!mesh) {
+        console.error("[Server] 4. Error: Converter failed or returned empty mesh.");
+        return { error: "Converter returned empty mesh" };
+    }
+
+    console.log("[Server] 5. Batch generation successful! Returning mesh to UI...");
+    return { success: true, mesh };
+
+  } catch (e: any) {
+    console.error("\n[Server] BATCH GEN ERROR:", e.message || e);
+    return { error: `Server Error during batch generation: ${e.message}` };
+  }
+}
 
 // export async function autoFetchFromRedis() {
 //   try {
@@ -373,7 +372,7 @@ export async function autoFetchFromRedis() {
 
     const Redis = (await import("ioredis")).default;
     const redisClient = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
-    
+
     const rawData = await redisClient.lpop("cad_exports"); 
 
     if (!rawData) {

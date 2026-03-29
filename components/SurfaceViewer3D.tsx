@@ -1,12 +1,12 @@
 "use client";
 
 import { Canvas, useThree } from "@react-three/fiber";
-import { OrbitControls, Stage } from "@react-three/drei";
+import { OrbitControls, Stage,Grid } from "@react-three/drei";
 import * as THREE from "three";
 import { useMemo, useState } from "react";
 
 // --- MESH COMPONENT ---
-function MiningMesh({ data, isSelected }: { data: any; isSelected: boolean }) {
+function MiningMesh({ data, isSelected, showWireframe }: { data: any; isSelected: boolean;showWireframe: boolean; }) {
   const geometry = useMemo(() => {
     if (!data?.vertices || !data?.indices) return null;
     
@@ -33,10 +33,12 @@ function MiningMesh({ data, isSelected }: { data: any; isSelected: boolean }) {
       </mesh>
 
       {/* 2. The Wireframe Overlay */}
-      <lineSegments>
-        <wireframeGeometry args={[geometry]} />
-        <lineBasicMaterial color="white" opacity={0.3} transparent linewidth={1} />
-      </lineSegments>
+      {showWireframe && (
+        <lineSegments>
+          <wireframeGeometry args={[geometry]} />
+          <lineBasicMaterial color="white" opacity={0.3} transparent linewidth={1} />
+        </lineSegments>
+      )}
     </group>
   );
 }
@@ -82,6 +84,7 @@ function SelectionManager({
 }
 
 // --- MAIN COMPONENT ---
+// --- MAIN COMPONENT ---
 export default function SurfaceViewer3D({ 
   meshes, 
   selectedIds, 
@@ -94,13 +97,17 @@ export default function SurfaceViewer3D({
   const safeIds = selectedIds || new Set();
   const safeSelect = onMultiSelect || (() => {});
   
-  // Mouse Drag State for Selection Box
+  // Mouse Drag State
   const [dragStart, setDragStart] = useState<{x:number, y:number} | null>(null);
   const [dragCurrent, setDragCurrent] = useState<{x:number, y:number} | null>(null);
   const [finishedBox, setFinishedBox] = useState<any>(null);
 
+  // NEW: Unity-Style Grid Toggle State
+  const [showGrid, setShowGrid] = useState(true);
+
+  const [showWireframe, setShowWireframe] = useState(true);
+
   const handleMouseDown = (e: React.MouseEvent) => {
-    // LEFT MOUSE (0) -> SELECT
     if (e.button === 0) { 
         setDragStart({ x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY });
         setDragCurrent({ x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY });
@@ -125,41 +132,77 @@ export default function SurfaceViewer3D({
         onMouseMove={handleMouseMove} 
         onMouseUp={handleMouseUp}
     >
+      {/* --- NEW: UNITY-STYLE TOOLBAR --- */}
+      <div className="absolute top-2 right-2 z-10 flex gap-2">
+        {/* Wireframe Button */}
+        <button
+          onClick={() => setShowWireframe(!showWireframe)}
+          className={`px-3 py-1 text-[10px] font-bold rounded border transition-colors shadow-lg flex items-center gap-2 ${
+            showWireframe
+              ? "bg-[#3a3a4a] border-purple-500 text-purple-300"
+              : "bg-[#222] border-gray-700 text-gray-500 hover:bg-[#333]"
+          }`}
+        >
+          <span className="text-sm">◩</span> {showWireframe ? "MESH: ON" : "MESH: OFF"}
+        </button>
+
+        {/* Grid Button */}
+        <button
+          onClick={() => setShowGrid(!showGrid)}
+          className={`px-3 py-1 text-[10px] font-bold rounded border transition-colors shadow-lg flex items-center gap-2 ${
+            showGrid
+              ? "bg-[#3a3a4a] border-blue-500 text-blue-300"
+              : "bg-[#222] border-gray-700 text-gray-500 hover:bg-[#333]"
+          }`}
+        >
+          <span className="text-sm">▦</span> {showGrid ? "GRID: ON" : "GRID: OFF"}
+        </button>
+      </div>
+
       <Canvas shadows camera={{ position: [100, 100, 100], fov: 50 }}>
-        {/* 1. Background Color (Dark Navy to match reference) */}
         <color attach="background" args={["#1a1a2e"]} />
         
-        {/* 2. Controls */}
         <OrbitControls 
             makeDefault 
             mouseButtons={{
-                LEFT: undefined, // Disable Left Rotate (Used for Select)
+                LEFT: undefined, 
                 MIDDLE: THREE.MOUSE.PAN,
-                RIGHT: THREE.MOUSE.ROTATE // Right Click to Rotate
+                RIGHT: THREE.MOUSE.ROTATE 
             }}
         />
         
-        {/* 3. Helpers (Grid & Axes) */}
-        <gridHelper args={[500, 50, 0x444444, 0x222222]} />
-        <axesHelper args={[100]} />
+        {/* --- NEW: INFINITE GRID --- */}
+        {showGrid && (
+          <group>
+            {/* The Drei Grid is infinite, so it never disappears no matter how far you zoom! */}
+            <Grid 
+              infiniteGrid 
+              fadeDistance={20000} // Fades out smoothly in the distance
+              sectionColor="#444444" 
+              cellColor="#222222" 
+              sectionSize={100} // Major grid lines
+              cellSize={10}     // Minor grid lines
+            />
+            <axesHelper args={[500]} />
+          </group>
+        )}
 
-        {/* 4. Lighting (Matches app.js) */}
         <ambientLight intensity={0.6} />
         <directionalLight position={[100, 100, 50]} intensity={0.8} />
         <directionalLight position={[-100, -100, -50]} intensity={0.4} />
 
-        {/* 5. Render Meshes */}
-        <Stage intensity={0} environment={null} adjustCamera={false}>
+        <Stage intensity={0} environment={null} adjustCamera={true}>
            {meshes.map((m, i) => (
-             <MiningMesh key={i} data={m} isSelected={safeIds.has(m.id)} />
+             <MiningMesh  
+                  key={i} data={m} 
+                  isSelected={safeIds.has(m.id)}
+                  showWireframe={showWireframe} />
            ))}
         </Stage>
         
-        {/* 6. Selection Logic */}
         <SelectionManager meshes={meshes} selectionBox={finishedBox} onSelect={safeSelect} />
       </Canvas>
       
-      {/* 7. Selection Box Overlay */}
       {dragStart && dragCurrent && (
          <div className="absolute border border-white bg-white/10 pointer-events-none z-50"
            style={{

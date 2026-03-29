@@ -1,32 +1,42 @@
 "use client";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { autoFetchFromRedis } from "@/app/actions";
 
 export default function CADListener() {
   const router = useRouter();
 
   useEffect(() => {
-    const checkNewData = async () => {
+    console.log("Starting lightweight SSE CAD Listener...");
+    
+    // Open the single, dedicated pipeline to the server
+    const eventSource = new EventSource("/api/cad-stream");
+
+    // This fires ONLY when the server pushes new data down the pipe
+    eventSource.onmessage = (event) => {
       try {
-         console.log("Polling Redis..."); // Uncomment if you want to see every poll
-        const res = await autoFetchFromRedis();
+        const data = JSON.parse(event.data);
         
-        if (res?.success) {
-          console.log(`%c[Client] SUCCESS! Received ${res.count} items. Refreshing UI...`, "color: green; font-weight: bold;");
+        if (data.type === "refresh") {
+          console.log(`%c[Client] SUCCESS! Server saved ${data.count} items. Refreshing UI...`, "color: green; font-weight: bold;");
+          // Tell Next.js to update the screen with the new database data!
           router.refresh();
-        } else if (res && !res.success) {
-           console.warn("[Client] Polling returned error:", res.message);
         }
       } catch (err) {
-        console.error("[Client] Polling crashed:", err);
+        console.error("[Client] Failed to parse SSE message", err);
       }
     };
 
-    // Poll every 3 seconds
-    const interval = setInterval(checkNewData, 3000);
-    return () => clearInterval(interval);
+    // If the server restarts, EventSource will automatically try to reconnect!
+    eventSource.onerror = (error) => {
+      console.error("[Client] SSE Connection interrupted. Reconnecting...");
+    };
+
+    // Close the pipeline if the user leaves the page
+    return () => {
+      eventSource.close();
+    };
   }, [router]);
 
-  return null;
+  // Invisible component
+  return null; 
 }
