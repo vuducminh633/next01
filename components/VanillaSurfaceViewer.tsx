@@ -18,11 +18,9 @@ export default function VanillaSurfaceViewer({
   const controlsRef = useRef<OrbitControls | null>(null);
   const meshGroupRef = useRef<THREE.Group | null>(null);
 
-  // 1. INITIALIZE SCENE (Run once)
+  //  INITIALIZE SCENE 
   useEffect(() => {
     if (!containerRef.current) return;
-
-    // --- YOUR APP.JS INIT CODE GOES HERE ---
     
     // Scene
     const scene = new THREE.Scene();
@@ -98,7 +96,7 @@ export default function VanillaSurfaceViewer({
     };
   }, []);
 
-  // 2. UPDATE MESHES (Run when data changes)
+  //  UPDATE MESHES 
   useEffect(() => {
     const group = meshGroupRef.current;
     if (!group) return;

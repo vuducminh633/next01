@@ -59,21 +59,21 @@ export async function saveCadData(rawText: string, mapNameStr: string = "Bản �
     console.log("\n--- [Server] STARTING CAD DATA UPLOAD ---");
     console.log(`[Server] 1. Parsing string payload (${rawText.length} characters)`);
 
-    // 1. Safely Parse the String back into JSON on the Server
+    // Safely Parse the String back into JSON on the Server
     let jsonData = JSON.parse(rawText);
     if (!Array.isArray(jsonData)) jsonData = [jsonData];
     
     console.log(`[Server] 2. Parsed JSON successfully. Found ${jsonData.length} objects.`);
     if (jsonData.length === 0) return { error: "Empty JSON data." };
 
-    // 3. Database: Map
+    //  Database: Map
     console.log(`[Server] 3. Finding or creating Map: ${mapNameStr}`);
     let [mapRecord] = await db.select().from(maps).where(eq(maps.name, mapNameStr)).limit(1);
     if (!mapRecord) {
       [mapRecord] = await db.insert(maps).values({ name: mapNameStr }).returning();
     }
 
-    // 4. Memory Grouping
+    // Memory Grouping
     console.log(`[Server] 4. Grouping data into hierarchy...`);
     const groupedData: Record<string, Record<string, any[]>> = {};
     for (const item of jsonData) {
@@ -84,7 +84,7 @@ export async function saveCadData(rawText: string, mapNameStr: string = "Bản �
       groupedData[vName][bName].push(item);
     }
 
-    // 5. Database: Vỉa, Khối, and Lines
+    // Database: Vỉa, Khối, and Lines
     console.log(`[Server] 5. Preparing relational data...`);
     const linesToInsert = [];
 
@@ -108,7 +108,7 @@ export async function saveCadData(rawText: string, mapNameStr: string = "Bản �
       }
     }
 
-    // 6. Bulk Insert (CHUNKED to prevent call stack crashes!)
+    // Bulk Insert
     console.log(`[Server] 6. Pushing ${linesToInsert.length} lines to PostgreSQL...`);
     
     if (linesToInsert.length > 0) {

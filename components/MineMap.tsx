@@ -23,7 +23,7 @@ export default function MineMap({ data, selectedIds, onMultiSelect }: MineMapPro
 
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // --- 1. HANDLE RESIZE & LAYOUT ---
+  // --- HANDLE RESIZE & LAYOUT ---
   useEffect(() => {
     if (!containerRef.current || !canvasRef.current) return;
 
@@ -44,7 +44,7 @@ export default function MineMap({ data, selectedIds, onMultiSelect }: MineMapPro
     return () => resizeObserver.disconnect();
   }, []);
 
-  // --- 2. SMART AUTO-FIT ---
+  // ---  SMART AUTO-FIT ---
   // Only fit when we have Data AND a valid Canvas Size
   useEffect(() => {
     if (data.length > 0 && canvasSize.w > 0 && canvasSize.h > 0) {
@@ -56,22 +56,22 @@ export default function MineMap({ data, selectedIds, onMultiSelect }: MineMapPro
     }
   }, [data, canvasSize]); // Depend on size changes too!
 
-  // --- 3. MAIN RENDER LOOP ---
+  // ---  MAIN RENDER LOOP ---
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // A. BACKGROUND
+    //. BACKGROUND
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = "#0f0f0f"; 
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // B. GRID
+    //  GRID
     drawGrid(ctx, canvas.width, canvas.height, camera);
 
-    // C. SORT OBJECTS (Fix for TS Error)
+    //  SORT OBJECTS 
     // Explicitly typed arrays to solve implicit 'any[]' error
     const unselected: any[] = [];
     const selected: any[] = [];
@@ -89,7 +89,7 @@ export default function MineMap({ data, selectedIds, onMultiSelect }: MineMapPro
     // Draw Selected (Bright & Top)
     selected.forEach(item => drawObject(ctx, item, true, canvas.height));
 
-    // D. SELECTION BOX
+    // SELECTION BOX
     if (interaction.current.isSelecting) {
       const { startX, startY, currX, currY } = interaction.current;
       const rectX = Math.min(startX, currX);
@@ -198,7 +198,6 @@ export default function MineMap({ data, selectedIds, onMultiSelect }: MineMapPro
     const dataW = maxX - minX || 100;
     const dataH = maxY - minY || 100;
 
-    // Add 10% padding
     const scale = Math.min(viewW / dataW, viewH / dataH) * 0.9;
     
     // Center point of the data

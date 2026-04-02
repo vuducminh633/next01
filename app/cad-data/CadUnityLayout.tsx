@@ -68,7 +68,7 @@ const InspectorSection = ({ title, children, defaultOpen = true }: { title: stri
 };
 
 // --- MAIN LAYOUT ---
-// Note: initialData is now a single map object containing the nested tree
+//  initialData is now a single map object containing the nested tree
 export default function CadUnityLayout({ initialData }: { initialData: any }) {
   const router = useRouter();
 
@@ -148,7 +148,7 @@ export default function CadUnityLayout({ initialData }: { initialData: any }) {
   const handleRefresh = () => router.refresh();
 
   // --- FLATTEN DATA FOR VIEWERS ---
-  // The 2D Map expects a flat list of lines. We extract them from the tree here.
+  // The 2D Map expects a flat list of line
   const allLines = useMemo(() => {
     if (!mapData || !mapData.vias) return [];
     const lines: any[] = [];

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import MeshViewer from "../../components/MeshViewer"; 
 
-// 1. UPDATED TYPE: Matches our new cad_lines schema + the flattened tree data
+// Matches new cad_lines schema + the flattened tree data
 type CadItem = {
   id: number;
   handle: string;

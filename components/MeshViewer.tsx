@@ -11,7 +11,7 @@ export default function MeshViewer({ type, data }: CadProps) {
   const [wasm, setWasm] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // 1. Load Wasm (Standard)
+  // Load Wasm
   useEffect(() => {
     // Check if script already exists to prevent duplicate loading
     if (document.getElementById("cad-wasm-script")) {
@@ -37,7 +37,7 @@ export default function MeshViewer({ type, data }: CadProps) {
     document.body.appendChild(script);
   }, []);
 
-  // 2. Draw Logic
+  // Draw Logic
   useEffect(() => {
     if (!wasm || !canvasRef.current || !data) return;
     
@@ -57,14 +57,14 @@ export default function MeshViewer({ type, data }: CadProps) {
     const SEGMENTS = 64; 
 
     try {
-      // --- CASE 1: CIRCLE (Requires Wasm) ---
+      // Cirlce
       if (data.Radius && data.CenterPoint && !data.StartAngle) {
         const [cx, cy] = data.CenterPoint;
         const ptr = wasm._generate_circle_mesh(cx, cy, data.Radius, SEGMENTS);
         const count = wasm._get_last_count(SEGMENTS);
         vertices = new Float32Array(wasm.HEAPF32.buffer, ptr, count);
       } 
-      // --- CASE 2: ARC (Requires Wasm) ---
+      // arc
       else if (data.Radius && data.CenterPoint && data.StartAngle !== undefined) {
         const [cx, cy] = data.CenterPoint;
         const ptr = wasm._generate_arc_mesh(
@@ -76,7 +76,7 @@ export default function MeshViewer({ type, data }: CadProps) {
         const count = wasm._get_last_count(SEGMENTS);
         vertices = new Float32Array(wasm.HEAPF32.buffer, ptr, count);
       }
-      // --- CASE 3: POLYLINE / SHAPE (FlattenedVertices Priority) ---
+      // polyline
       // We check for properties directly, so "Vách" or "Vỉa" works automatically.
       else if (data.FlattenedVertices || data.Vertices || (data.StartPoint && data.EndPoint)) {
         
@@ -105,9 +105,9 @@ export default function MeshViewer({ type, data }: CadProps) {
       return;
     }
 
-    // --- RENDER & AUTO-SCALE ---
+    //render + autoscale
     if (vertices && vertices.length > 0) {
-      // 1. Calculate Bounds (Min/Max)
+      //  Calculate Bounds (Min/Max)
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
       
       for (let i = 0; i < vertices.length; i += 3) {
@@ -119,7 +119,7 @@ export default function MeshViewer({ type, data }: CadProps) {
         if (y > maxY) maxY = y;
       }
 
-      // 2. Calculate Scale to Fit Canvas
+      // Calculate Scale to Fit Canvas
       const PADDING = 40;
       const availWidth = canvas.width - PADDING;
       const availHeight = canvas.height - PADDING;
@@ -133,7 +133,7 @@ export default function MeshViewer({ type, data }: CadProps) {
       // Choose the smaller scale to maintain aspect ratio
       const scale = Math.min(scaleX, scaleY);
 
-      // 3. Draw with Offset
+      // Draw with Offset
       // Center the shape in the available space
       const offsetX = (canvas.width - rangeX * scale) / 2;
       const offsetY = (canvas.height - rangeY * scale) / 2;

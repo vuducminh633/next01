@@ -102,7 +102,7 @@ export default async function Home() {
     );
   }
 
-  // --- VIEW FOR GUESTS (Landing Page) ---
+  // --- VIEW FOR GUESTS ---
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-gray-50">
       <div className="text-center space-y-6 bg-white p-10 rounded-2xl shadow-xl max-w-md w-full">

@@ -34,17 +34,16 @@ function MiningMesh({
 
   return (
     <group>
-      {/* 1. The Solid Mesh */}
+      {/*  The Solid Mesh */}
       <mesh 
         geometry={geometry}
-        // 3. ADD THE R3F CLICK EVENT HERE
+        //  ADD THE R3F CLICK EVENT HERE
         onClick={(e) => {
           e.stopPropagation(); // Prevent clicking objects behind this one
           if (onBlockClick && data.blockId) {
             onBlockClick(data.blockId);
           }
         }}
-        // Optional: Change the mouse cursor to a pointer when hovering over the rock
         onPointerOver={(e) => (document.body.style.cursor = 'pointer')}
         onPointerOut={(e) => (document.body.style.cursor = 'auto')}
       >
@@ -56,7 +55,7 @@ function MiningMesh({
         />
       </mesh>
 
-      {/* 2. The Wireframe Overlay */}
+      {/*  The Wireframe Overlay */}
       {showWireframe && (
         <lineSegments>
           <wireframeGeometry args={[geometry]} />
@@ -67,7 +66,7 @@ function MiningMesh({
   );
 }
 
-// --- SELECTION MANAGER (Logic to handle click/box selection) ---
+// --- SELECTION MANAGER ---
 function SelectionManager({ 
   meshes, selectionBox, onSelect 
 }: { 
@@ -94,7 +93,7 @@ function SelectionManager({
         const sy = (-(v.y) * 0.5 + 0.5) * size.height;
 
         if (isClick) {
-            // Loose click detection (approximate)
+            // Loose click detectio
             if (Math.abs(sx - minX) < 20 && Math.abs(sy - minY) < 20) newSelection.add(meshData.id);
         } else {
             // Box selection
@@ -107,8 +106,7 @@ function SelectionManager({
   return null;
 }
 
-// --- MAIN COMPONENT ---
-// --- MAIN COMPONENT ---
+
 export default function SurfaceViewer3D({ 
   meshes, 
   selectedIds, 
@@ -128,7 +126,6 @@ export default function SurfaceViewer3D({
   const [dragCurrent, setDragCurrent] = useState<{x:number, y:number} | null>(null);
   const [finishedBox, setFinishedBox] = useState<any>(null);
 
-  // NEW: Unity-Style Grid Toggle State
   const [showGrid, setShowGrid] = useState(true);
 
   const [showWireframe, setShowWireframe] = useState(true);
@@ -158,7 +155,7 @@ export default function SurfaceViewer3D({
         onMouseMove={handleMouseMove} 
         onMouseUp={handleMouseUp}
     >
-      {/* --- NEW: UNITY-STYLE TOOLBAR --- */}
+      {/* --- UNITY-STYLE TOOLBAR --- */}
       <div className="absolute top-2 right-2 z-10 flex gap-2">
         {/* Wireframe Button */}
         <button
@@ -197,10 +194,9 @@ export default function SurfaceViewer3D({
             }}
         />
         
-        {/* --- NEW: INFINITE GRID --- */}
+        {/* --- INFINITE GRID --- */}
         {showGrid && (
           <group>
-            {/* The Drei Grid is infinite, so it never disappears no matter how far you zoom! */}
             <Grid 
               infiniteGrid 
               fadeDistance={20000} // Fades out smoothly in the distance
