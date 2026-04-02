@@ -24,7 +24,7 @@ export default function VanillaSurfaceViewer({
     
     // Scene
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1a1a2e); // Your background color
+    scene.background = new THREE.Color(0x1a1a2e); 
     sceneRef.current = scene;
 
     // Camera
@@ -45,7 +45,7 @@ export default function VanillaSurfaceViewer({
     controls.dampingFactor = 0.05;
     controlsRef.current = controls;
 
-    // Lighting (Matched to your app.js)
+    // Lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
 
@@ -116,13 +116,13 @@ export default function VanillaSurfaceViewer({
     meshes.forEach((meshData) => {
       if (!meshData.vertices || !meshData.indices) return;
 
-      // Create Geometry (Your bridge returns flat arrays, so we use BufferGeometry)
+      // Create Geometry 
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(meshData.vertices), 3));
       geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(meshData.indices), 1));
       geometry.computeVertexNormals();
 
-      // Material (Your Blue Color)
+      // Material 
       const material = new THREE.MeshPhongMaterial({
         color: 0x00a8ff,
         side: THREE.DoubleSide,
@@ -142,7 +142,7 @@ export default function VanillaSurfaceViewer({
       group.add(mesh);
     });
 
-    // Fit Camera to Mesh (Optional but helpful)
+    // Fit Camera to Mesh
     if (group.children.length > 0 && cameraRef.current && controlsRef.current) {
         const box = new THREE.Box3().setFromObject(group);
         const center = box.getCenter(new THREE.Vector3());

@@ -21,7 +21,7 @@ export default function RootLayout({
         {/* 
            Hub Page, and Map Page automatically. 
         */}
-        {/* <CADListener /> */}
+        <CADListener />
         
         {children}
       </body>

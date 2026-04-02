@@ -53,5 +53,3 @@ export async function POST(request: Request) {
   }
 }
 
-//http://<192.168.1.143>:3000/api/cad-upload
-//ssh -L 6379:127.0.0.1:10001 -p 32222 psiuser@mica.edu.vn
