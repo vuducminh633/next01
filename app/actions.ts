@@ -12,6 +12,11 @@ import { runCppConverter } from "@/lib/bridge";
 
 
 const redisClient = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
+redisClient.on("error", () => {});
+
+const rgbToHex = (r: number, g: number, b: number) => {
+  return "#" + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+};
 
 // --- USER AUTHENTICATION ---
 export async function registerUser(prevState: any, formData: FormData) {
@@ -49,84 +54,6 @@ export async function registerUser(prevState: any, formData: FormData) {
 }
 
 
-// // Save CAD Data (Simplified: Create Map -> Save Objects)
-// export async function saveCadData(jsonData: any[], mapNameStr: string = "Bản đồ Nhập liệu") {
-//   try {
-//     if (!Array.isArray(jsonData) || jsonData.length === 0) {
-//       return { error: "Invalid JSON format or empty data." };
-//     }
-
-//     //  FIND OR CREATE MAP
-//     let [mapRecord] = await db.select().from(maps).where(eq(maps.name, mapNameStr)).limit(1);
-//     if (!mapRecord) {
-//       [mapRecord] = await db.insert(maps).values({ name: mapNameStr }).returning();
-//     }
-
-//     //  GROUP THE FLAT JSON IN MEMORY
-//     // Structure: { "Via 1": { "Khoi 1": [item1, item2], "Khoi 2": [...] } }
-//     const groupedData: Record<string, Record<string, any[]>> = {};
-    
-//     for (const item of jsonData) {
-//       const vName = item.ViaName || item.GroupName || "Unknown Vỉa";
-//       const bName = item.BlockName || "Default Khối";
-      
-//       if (!groupedData[vName]) groupedData[vName] = {};
-//       if (!groupedData[vName][bName]) groupedData[vName][bName] = [];
-//       groupedData[vName][bName].push(item);
-//     }
-
-//     // INSERT INTO RELATIONAL TABLES
-//     const linesToInsert = [];
-
-//     for (const [vName, blocksObj] of Object.entries(groupedData)) {
-//       // A. Insert or Find Vỉa
-//       let [viaRecord] = await db.select().from(vias)
-//         .where(and(eq(vias.mapId, mapRecord.id), eq(vias.name, vName))).limit(1);
-      
-//       if (!viaRecord) {
-//         [viaRecord] = await db.insert(vias).values({ mapId: mapRecord.id, name: vName }).returning();
-//       }
-
-//       for (const [bName, items] of Object.entries(blocksObj)) {
-//         // B. Insert or Find Khối
-//         let [blockRecord] = await db.select().from(blocks)
-//           .where(and(eq(blocks.viaId, viaRecord.id), eq(blocks.name, bName))).limit(1);
-        
-//         if (!blockRecord) {
-//           [blockRecord] = await db.insert(blocks).values({ viaId: viaRecord.id, name: bName }).returning();
-//         }
-
-//         // Prepare CAD Lines for this Khối
-//         for (const item of items) {
-//           linesToInsert.push({
-//             blockId: blockRecord.id,
-//             handle: item.Handle || crypto.randomUUID(), // Handle must be unique
-//             partType: item.PartType || item.Type || item.ObjectType || "Unknown",
-//             layer: item.Layer || "0",
-//             properties: item, // Save the raw geometry here
-//           });
-//         }
-//       }
-//     }
-
-//     // BULK INSERT ALL CAD LINES
-//     if (linesToInsert.length > 0) {
-//       // Using onConflictDoNothing in case you re-upload the same file
-//       await db.insert(cadLines).values(linesToInsert).onConflictDoNothing({ target: cadLines.handle });
-//     }
-
-//     revalidatePath("/", "layout");
-//     return { success: true, count: linesToInsert.length };
-
-//   } catch (error) {
-//     console.error("[Server] CRITICAL SAVE ERROR:", error);
-//     return { error: "Failed to process and save hierarchical map data." };
-//   }
-// }
-// --- DATA FETCHING ---
-
-// Save CAD Data (Simplified: Create Map -> Save Objects)
-// Save CAD Data (FormData Version)
 export async function saveCadData(rawText: string, mapNameStr: string = "Bản đồ Nhập liệu") {
   try {
     console.log("\n--- [Server] STARTING CAD DATA UPLOAD ---");
@@ -190,7 +117,6 @@ export async function saveCadData(rawText: string, mapNameStr: string = "Bản �
         const chunk = linesToInsert.slice(i, i + CHUNK_SIZE);
         await db.insert(cadLines)
                 .values(chunk)
-                .onConflictDoNothing({ target: cadLines.handle });
         console.log(`[Server] -> Safely inserted items ${i + 1} to ${i + chunk.length}`);
       }
     }
@@ -253,16 +179,35 @@ export async function generate3DModel(blockId: number) {
       return { error: "C++ conversion failed." };
     }
 
-    console.log(`[Server] 3. Mesh generated successfully! Saving to database...`);
+
+
+    // --- RGB COLOR EXTRACTION ---
+    const rawProperties = fragments[0]?.properties as any;
+    let webColor = "#00a8ff"; // Default fallback blue
+
+    if (rawProperties?.TrueColor && Array.isArray(rawProperties.TrueColor) && rawProperties.TrueColor.length === 3) {
+      const [r, g, b] = rawProperties.TrueColor;
+      
+      // Only convert if it's not [0,0,0] (standard AutoCAD "unset" color)
+      if (r !== 0 || g !== 0 || b !== 0) {
+        webColor = rgbToHex(r, g, b);
+      }
+    }
+    // ----------------------------
+
+    console.log(`[Server] 3. Mesh generated! Block color (RGB): ${webColor}. Saving...`);
+
+
     await db.insert(blockMeshes)
       .values({
         blockId: blockId,
         vertices: mesh.vertices,
         indices: mesh.indices,
+        color: webColor,
       })
       .onConflictDoUpdate({
         target: blockMeshes.blockId, 
-        set: { vertices: mesh.vertices, indices: mesh.indices }
+        set: { vertices: mesh.vertices, indices: mesh.indices, color: webColor }
       });
 
     console.log(`[Server] 4. Save successful! Refreshing UI...`);
@@ -300,7 +245,7 @@ export async function generateBatch3DModel(lineIds: number[]) {
     }
 
     console.log("[Server] 1. Fetching CAD lines from PostgreSQL...");
-    // Fetch ALL selected CAD lines at once using the new table
+    // Fetch ALL selected CAD lines at once
     const items = await db
       .select()
       .from(cadLines)
@@ -313,16 +258,56 @@ export async function generateBatch3DModel(lineIds: number[]) {
       return { error: "No items found" };
     }
 
-    console.log("[Server] 3. Sending batch to C++ Converter...");
-    const mesh = await runCppConverter(items);
-
-    if (!mesh) {
-        console.error("[Server] 4. Error: Converter failed or returned empty mesh.");
-        return { error: "Converter returned empty mesh" };
+    console.log("[Server] 3. Grouping lines by Block (Khối)...");
+    const groupedByBlock: Record<number, typeof items> = {};
+    for (const item of items) {
+      if (!groupedByBlock[item.blockId]) {
+        groupedByBlock[item.blockId] = [];
+      }
+      groupedByBlock[item.blockId].push(item);
     }
 
-    console.log("[Server] 5. Batch generation successful! Returning mesh to UI...");
-    return { success: true, mesh };
+    const generatedMeshes = [];
+    console.log(`[Server] 4. Found ${Object.keys(groupedByBlock).length} separate Blocks. Sending to C++ Converter...`);
+
+    // Loop through each group and generate a separate mesh
+    for (const [blockIdStr, blockItems] of Object.entries(groupedByBlock)) {
+      const blockId = parseInt(blockIdStr);
+      console.log(`[Server] -> Processing Block ID: ${blockId} with ${blockItems.length} lines`);
+
+      const mesh = await runCppConverter(blockItems);
+
+      if (mesh) {
+        // Find the color specifically for this Block
+        const rawProps = blockItems[0]?.properties as any;
+        let previewColor = "#00a8ff"; // Default fallback
+        
+        if (rawProps?.TrueColor && Array.isArray(rawProps.TrueColor) && rawProps.TrueColor.length === 3) {
+          const [r, g, b] = rawProps.TrueColor;
+          // Only use RGB if it is not pure black [0,0,0]
+          if (r !== 0 || g !== 0 || b !== 0) {
+            previewColor = rgbToHex(r, g, b);
+          }
+        }
+
+        generatedMeshes.push({
+          ...mesh,
+          blockId: blockId,
+          color: previewColor
+        });
+      } else {
+        console.error(`[Server] -> Error: Converter failed for Block ID: ${blockId}`);
+      }
+    }
+
+    if (generatedMeshes.length === 0) {
+        return { error: "Converter failed to generate any meshes" };
+    }
+
+    console.log(`[Server] 5. Batch generation successful! Returning ${generatedMeshes.length} meshes to UI...`);
+    
+    // Notice we are returning `meshes` (array) instead of `mesh` (single object)
+    return { success: true, meshes: generatedMeshes };
 
   } catch (e: any) {
     console.error("\n[Server] BATCH GEN ERROR:", e.message || e);
@@ -330,48 +315,11 @@ export async function generateBatch3DModel(lineIds: number[]) {
   }
 }
 
-// export async function autoFetchFromRedis() {
-//   try {
-//     // Pull the oldest item from the Redis list (Queue)
-//     // *Note: Change "cad_exports" to whatever key C# plugin is saving to in Redis!
-//     const rawData = await redisClient.lpop("cad_exports"); 
-
-//     if (!rawData) {
-//       return { success: false, message: "No new data in Redis." };
-//     }
-
-//     // Parse the JSON string from AutoCAD
-//     const parsedData = JSON.parse(rawData);
-    
-//     // Ensure it's an array for our saveCadData function
-//     const dataArray = Array.isArray(parsedData) ? parsedData : [parsedData];
-
-//     if (dataArray.length === 0) {
-//       return { success: false, message: "Redis data was empty." };
-//     }
-
-//     console.log(`[Server] Pulled ${dataArray.length} items from Redis. Saving to database...`);
-
-//     // Pass the parsed data directly to hierarchical save function!
-//     const saveResult = await saveCadData(dataArray, "Bản đồ Live (AutoCAD)");
-
-//     if (saveResult.success) {
-//       return { success: true, count: saveResult.count };
-//     } else {
-//       console.error("[Server] DB Save Error:", saveResult.error);
-//       return { success: false, message: saveResult.error };
-//     }
-
-//   } catch (error) {
-//     console.error("[Server] Redis Polling Error:", error);
-//     return { success: false, message: "Internal Server Error" };
-//   }
-// }
 export async function autoFetchFromRedis() {
   try {
 
     const Redis = (await import("ioredis")).default;
-    const redisClient = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
+    //const redisClient = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
 
     const rawData = await redisClient.lpop("cad_exports"); 
 

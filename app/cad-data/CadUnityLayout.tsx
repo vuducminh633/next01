@@ -50,6 +50,23 @@ const ResizeHandle = ({ onDrag, vertical = false }: { onDrag: (delta: number) =>
   );
 };
 
+const InspectorSection = ({ title, children, defaultOpen = true }: { title: string, children: React.ReactNode, defaultOpen?: boolean }) => {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+  
+  return (
+    <div className="border-b border-[#111]">
+      <button 
+        onClick={() => setIsOpen(!isOpen)} 
+        className="w-full text-left px-2 py-1.5 bg-[#222] hover:bg-[#333] text-[10px] font-bold text-gray-400 flex items-center gap-1 transition-colors"
+      >
+        <span className={`transform transition-transform text-[8px] ${isOpen ? 'rotate-90' : ''}`}>▶</span>
+        {title}
+      </button>
+      {isOpen && <div className="p-2 bg-[#1a1a1a]">{children}</div>}
+    </div>
+  );
+};
+
 // --- MAIN LAYOUT ---
 // Note: initialData is now a single map object containing the nested tree
 export default function CadUnityLayout({ initialData }: { initialData: any }) {
@@ -58,6 +75,10 @@ export default function CadUnityLayout({ initialData }: { initialData: any }) {
   // --- DATA STATE ---
   const [mapData, setMapData] = useState<any>(initialData);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+
+  //Unity-style active inspector item
+  const [inspectedItem, setInspectedItem] = useState<{ type: "map" | "via" | "block" | "line", data: any } | null>(null);
+
   const [sceneMeshes, setSceneMeshes] = useState<any[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -68,8 +89,45 @@ export default function CadUnityLayout({ initialData }: { initialData: any }) {
   const [rightWidth, setRightWidth] = useState(280);
  
   //state for 2d map
+  const [isObjInfoExpanded, setIsObjInfoExpanded] = useState(true);
   const [isMapExpanded, setIsMapExpanded] = useState(true);
   const [mapHeight, setMapHeight] = useState(300);
+
+  const [activeBlockInfo, setActiveBlockInfo] = useState<{ id: number; name: string; viaName: string; totalLines: number; vachCount: number; truCount: number } | null>(null);
+
+  const handleBlockClick = (blockId: number) => {
+    let foundBlock: any = null;
+    let parentVia: any = null;
+
+    mapData?.vias.forEach((via: any) => {
+      const block = via.blocks.find((b: any) => b.id === blockId);
+      if (block) {
+        foundBlock = block;
+        parentVia = via;
+      }
+    });
+
+    if (!foundBlock) return;
+
+    let vachCount = 0;
+    let truCount = 0;
+    
+    foundBlock.lines?.forEach((line: any) => {
+      const type = line.partType?.toLowerCase() || "";
+      if (type === "vách") vachCount++;
+      if (type === "trụ") truCount++;
+    });
+
+    setActiveBlockInfo({
+      id: foundBlock.id,
+      name: foundBlock.name,
+      viaName: parentVia.name,
+      totalLines: foundBlock.lines?.length || 0,
+      vachCount: vachCount,
+      truCount: truCount,
+    });
+    setInspectedItem({ type: 'block', data: foundBlock });
+  };
 
   // Keep state synced if server data changes
   useEffect(() => { 
@@ -167,8 +225,12 @@ export default function CadUnityLayout({ initialData }: { initialData: any }) {
       // LOG 3: Right before the network call
     console.log("Attemping Server Action call with:", idsToProcess);
       const result = await generateBatch3DModel(idsToProcess);
-      if (result.success && result.mesh) {
-        setSceneMeshes(prev => [...prev, { ...result.mesh, id: Date.now()}]);
+      if (result.success && result.meshes) {
+        const newMeshes = result.meshes.map((meshData, index) => ({
+          ...meshData,
+          id: Date.now() + index // Add index so they don't share the exact same millisecond ID
+        }));
+        setSceneMeshes(prev => [...prev, ...newMeshes]);
       } else {
         alert("Batch Gen Error: " + (result.error || ""));
       }
@@ -346,80 +408,149 @@ export default function CadUnityLayout({ initialData }: { initialData: any }) {
           </div>
           {/* The 3D viewer now naturally fills the entire center area */}
           <div className="absolute inset-0">
-            <SurfaceViewer3D meshes={sceneMeshes} selectedIds={selectedIds} onMultiSelect={(ids) => handleMultiSelect(ids, "replace")} />
-          </div>
+              <SurfaceViewer3D 
+                meshes={sceneMeshes} 
+                selectedIds={selectedIds} 
+                onMultiSelect={(ids) => handleMultiSelect(ids, "replace")} 
+                onBlockClick={handleBlockClick}
+/>          </div>
         </div>
 
         <ResizeHandle onDrag={(d) => setRightWidth(p => Math.max(200, Math.min(600, p - d)))} />
 
-{/* RIGHT PANE (INSPECTOR + 2D MAP) */}
-        <div style={{ width: rightWidth }} className="bg-[#1a1a1a] flex flex-col shrink-0 border-l border-black">
+{/* RIGHT PANE (MASTER INSPECTOR) */}
+        <div style={{ width: rightWidth }} className="bg-[#1a1a1a] flex flex-col shrink-0 border-l border-black h-full">
           
-          {/* TOP HALF: INSPECTOR - fills remaining space (flex-1) */}
-          <div className="flex flex-col flex-1 min-h-0">
-            <div className="p-2 text-[10px] font-bold text-gray-400 uppercase bg-[#222] border-b border-black shrink-0">
-              Inspector
-            </div>
-            <div className="flex-1 p-4 overflow-y-auto">
-              {selectedIds.size === 0 ? (
-                <div className="text-center text-gray-600 text-xs mt-10">No Selection</div>
-              ) : selectedIds.size > 1 ? (
-                <div className="text-white text-xs space-y-2">
-                  <div className="font-bold text-blue-400">{selectedIds.size} Items Selected</div>
-                  <div className="text-[10px] text-gray-500">Select single item to view properties</div>
-                </div>
-              ) : singleSelectedItem ? (
-                <div className="space-y-3">
-                    <div className="border-b border-gray-700 pb-2">
-                        <div className="text-xs font-bold text-white">{singleSelectedItem.partType || "Object"}</div>
-                        <div className="text-[10px] text-gray-500">ID: {singleSelectedItem.handle}</div>
+          {/* FIXED TAB HEADER */}
+          <div className="p-2 text-[10px] font-bold text-gray-400 uppercase bg-[#222] border-b border-black shrink-0 shadow-sm z-10">
+            Inspector
+          </div>
+
+          {/* ========================================= */}
+          {/* COMPONENT 1: SELECTED OBJECT INFO           */}
+          {/* ========================================= */}
+          <button 
+            onClick={() => setIsObjInfoExpanded(!isObjInfoExpanded)}
+            className="p-2 text-[10px] font-bold text-gray-300 uppercase bg-[#2a2a2a] hover:bg-[#333] border-b border-[#111] flex items-center gap-2 w-full text-left transition-colors shrink-0"
+          >
+            <span className={`transform transition-transform text-xs ${isObjInfoExpanded ? 'rotate-90' : ''}`}>▶</span>
+            Object Information
+          </button>
+
+          {isObjInfoExpanded && (
+            <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-800 flex flex-col min-h-0 bg-[#1a1a1a]">
+              {!inspectedItem ? (
+                <div className="text-center text-gray-500 text-xs mt-10 italic">No object selected</div>
+              ) : (
+                <div className="flex flex-col pb-4">
+                  
+                  {/* Unity-Style Header */}
+                  <div className="p-3 border-b border-gray-800 bg-[#1e1e1e]">
+                    <div className="text-xs font-bold text-white flex items-center gap-2">
+                      {inspectedItem.type === 'map' && ""}
+                      {inspectedItem.type === 'via' && " "}
+                      {inspectedItem.type === 'block' && " "}
+                      {inspectedItem.type === 'line' && "➖ "}
+                      {inspectedItem.data.name || inspectedItem.data.partType || "Project"}
                     </div>
-                    <pre className="text-[9px] text-green-500 overflow-auto bg-[#111] p-2 rounded border border-gray-800">
-                      {JSON.stringify(singleSelectedItem.properties, null, 2)}
+                    <div className="text-[9px] text-gray-500 mt-1 uppercase tracking-wider">
+                      {inspectedItem.type} {inspectedItem.data.id ? `| ID: ${inspectedItem.data.handle || inspectedItem.data.id}` : ''}
+                    </div>
+                  </div>
+
+                  {/* Properties Section */}
+                  <InspectorSection title="Properties" defaultOpen={true}>
+                    <pre className="text-[9px] text-green-500 overflow-x-auto bg-[#111] p-2 rounded border border-gray-800">
+                      {JSON.stringify(inspectedItem.data.properties || inspectedItem.data, (key, value) => {
+                        if (key === 'vias' || key === 'blocks' || key === 'lines' || key === 'mesh') return undefined; 
+                        return value;
+                      }, 2)}
                     </pre>
+                  </InspectorSection>
+
+                  {/* Children List: VIAS */}
+                  {(inspectedItem.type === 'map' && inspectedItem.data.vias?.length > 0) && (
+                    <InspectorSection title={`Child Vias (${inspectedItem.data.vias.length})`}>
+                      <div className="space-y-1">
+                        {inspectedItem.data.vias.map((v: any) => (
+                          <div key={v.id} className="text-[10px] text-gray-400 bg-[#222] px-2 py-1 rounded cursor-pointer hover:bg-[#333] border border-gray-800" 
+                               onClick={() => setInspectedItem({ type: 'via', data: v })}>
+                             {v.name}
+                          </div>
+                        ))}
+                      </div>
+                    </InspectorSection>
+                  )}
+
+                  {/* Children List: BLOCKS */}
+                  {(inspectedItem.type === 'via' && inspectedItem.data.blocks?.length > 0) && (
+                    <InspectorSection title={`Child Blocks (${inspectedItem.data.blocks.length})`}>
+                      <div className="space-y-1">
+                        {inspectedItem.data.blocks.map((b: any) => (
+                           <div key={b.id} className="text-[10px] text-gray-400 bg-[#222] px-2 py-1 rounded cursor-pointer hover:bg-[#333] border border-gray-800 flex justify-between" 
+                                onClick={() => setInspectedItem({ type: 'block', data: b })}>
+                             <span> {b.name}</span>
+                             <span className="text-blue-500">{b.lines?.length || 0} lines</span>
+                           </div>
+                        ))}
+                      </div>
+                    </InspectorSection>
+                  )}
+
+                  {/* Children List: LINES */}
+                  {(inspectedItem.type === 'block' && inspectedItem.data.lines?.length > 0) && (
+                    <InspectorSection title={`Child Lines (${inspectedItem.data.lines.length})`} defaultOpen={false}>
+                      <div className="space-y-1 max-h-48 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-gray-700">
+                        {inspectedItem.data.lines.map((l: any) => (
+                           <div key={l.id} className="text-[9px] text-gray-400 bg-[#222] px-2 py-1 rounded flex justify-between cursor-pointer hover:bg-[#333] border border-gray-800" 
+                                onClick={() => setInspectedItem({ type: 'line', data: l })}>
+                             <span className="truncate">{l.partType}</span>
+                             <span className="text-gray-600 shrink-0 ml-2">{l.handle}</span>
+                           </div>
+                        ))}
+                      </div>
+                    </InspectorSection>
+                  )}
+
                 </div>
-              ) : null}
+              )}
             </div>
-          </div>
+          )}
 
-          {/* BOTTOM HALF: UNITY-STYLE 2D MAP DROPDOWN with Resizer */}
-          <div className="flex flex-col shrink-0 border-t border-black bg-[#1a1a1a]">
-            
-            {/* The new vertical resize handle - it only appears when the map is expanded */}
-            {isMapExpanded && (
-              <ResizeHandle 
-                vertical 
-                // As you noted, the existing ResizeHandle is generic, so we're reusing it.
-                // When dragging *down* (positive movementY), we want to make the map shorter, 
-                // and when dragging *up* (negative movementY), we want to make it taller.
-                // So the logic is height = prev - deltaY.
-                onDrag={(d) => setMapHeight(prev => Math.max(100, Math.min(800, prev - d)))} // Limits between 100px and 800px
-              />
-            )}
+          {/* ========================================= */}
+          {/* RESIZER: Only appears if BOTH are open      */}
+          {/* ========================================= */}
+          {isObjInfoExpanded && isMapExpanded && (
+            <ResizeHandle 
+              vertical 
+              onDrag={(d) => setMapHeight(prev => Math.max(100, Math.min(800, prev - d)))} 
+            />
+          )}
 
-            {/* The Dropdown Button */}
-            <button 
-              onClick={() => setIsMapExpanded(!isMapExpanded)}
-              className="p-2 text-[10px] font-bold text-gray-400 uppercase bg-[#222] hover:bg-[#333] border-b border-black flex items-center gap-2 w-full text-left transition-colors cursor-pointer"
+          {/* ========================================= */}
+          {/* COMPONENT 2: 2D MAP PREVIEW                 */}
+          {/* ========================================= */}
+          <button 
+            onClick={() => setIsMapExpanded(!isMapExpanded)}
+            className={`p-2 text-[10px] font-bold text-gray-300 uppercase bg-[#2a2a2a] hover:bg-[#333] border-b border-[#111] flex items-center gap-2 w-full text-left transition-colors shrink-0 ${!isObjInfoExpanded && isMapExpanded ? 'border-t border-black mt-auto' : 'border-t border-black'}`}
+          >
+            <span className={`transform transition-transform text-xs ${isMapExpanded ? 'rotate-90' : ''}`}>▶</span>
+            2D Map Preview
+          </button>
+          
+          {isMapExpanded && (
+            <div 
+              style={{ height: isObjInfoExpanded ? mapHeight : 'auto' }} 
+              className={`relative bg-[#0a0a0a] ${!isObjInfoExpanded ? 'flex-1 min-h-0' : 'shrink-0'}`}
             >
-              <span className={`transform transition-transform text-xs ${isMapExpanded ? 'rotate-90' : ''}`}>
-                ▶
-              </span>
-              2D Map Preview
-            </button>
-            
-            {/* The Collapsible Content with resizable height */}
-            {isMapExpanded && (
-              <div style={{ height: mapHeight }} className="relative bg-[#0a0a0a]">
-                <div className="absolute top-2 left-2 z-10 bg-black/70 text-gray-400 text-[10px] px-2 py-1 rounded border border-gray-800 pointer-events-none">
-                  2D MAP
-                </div>
-                <div className="absolute inset-0">
-                  <MineMap data={allLines} selectedIds={selectedIds} onMultiSelect={(ids) => handleMultiSelect(ids, "replace")} />
-                </div>
+              <div className="absolute top-2 left-2 z-10 bg-black/70 text-gray-400 text-[10px] px-2 py-1 rounded border border-gray-800 pointer-events-none">
+                2D MAP
               </div>
-            )}
-          </div>
+              <div className="absolute inset-0">
+                <MineMap data={allLines} selectedIds={selectedIds} onMultiSelect={(ids) => handleMultiSelect(ids, "replace")} />
+              </div>
+            </div>
+          )}
 
         </div>
       </div>

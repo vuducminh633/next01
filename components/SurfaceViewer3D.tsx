@@ -6,7 +6,17 @@ import * as THREE from "three";
 import { useMemo, useState } from "react";
 
 // --- MESH COMPONENT ---
-function MiningMesh({ data, isSelected, showWireframe }: { data: any; isSelected: boolean;showWireframe: boolean; }) {
+function MiningMesh({ 
+  data, 
+  isSelected, 
+  showWireframe, 
+  onBlockClick // 1. ADD THIS PROP
+}: { 
+  data: any; 
+  isSelected: boolean;
+  showWireframe: boolean; 
+  onBlockClick?: (blockId: number) => void; // 2. DEFINE THE TYPE
+}) {
   const geometry = useMemo(() => {
     if (!data?.vertices || !data?.indices) return null;
     
@@ -20,12 +30,26 @@ function MiningMesh({ data, isSelected, showWireframe }: { data: any; isSelected
 
   if (!geometry) return null;
 
+  const meshColor = data.color || "#00a8ff";
+
   return (
     <group>
       {/* 1. The Solid Mesh */}
-      <mesh geometry={geometry}>
+      <mesh 
+        geometry={geometry}
+        // 3. ADD THE R3F CLICK EVENT HERE
+        onClick={(e) => {
+          e.stopPropagation(); // Prevent clicking objects behind this one
+          if (onBlockClick && data.blockId) {
+            onBlockClick(data.blockId);
+          }
+        }}
+        // Optional: Change the mouse cursor to a pointer when hovering over the rock
+        onPointerOver={(e) => (document.body.style.cursor = 'pointer')}
+        onPointerOut={(e) => (document.body.style.cursor = 'auto')}
+      >
         <meshPhongMaterial 
-          color={isSelected ? "#FFD700" : "#00a8ff"} // Blue color (#00a8ff) matches your reference
+          color={isSelected ? "#FFD700" : meshColor}
           side={THREE.DoubleSide}
           flatShading={false}
           shininess={50}
@@ -88,11 +112,13 @@ function SelectionManager({
 export default function SurfaceViewer3D({ 
   meshes, 
   selectedIds, 
-  onMultiSelect 
+  onMultiSelect ,
+  onBlockClick
 }: { 
   meshes: any[], 
   selectedIds?: Set<number>, 
-  onMultiSelect?: (ids: Set<number>) => void 
+  onMultiSelect?: (ids: Set<number>) => void, 
+  onBlockClick?: (blockId: number) => void
 }) {
   const safeIds = selectedIds || new Set();
   const safeSelect = onMultiSelect || (() => {});
@@ -196,7 +222,8 @@ export default function SurfaceViewer3D({
              <MiningMesh  
                   key={i} data={m} 
                   isSelected={safeIds.has(m.id)}
-                  showWireframe={showWireframe} />
+                  showWireframe={showWireframe} 
+                  onBlockClick={onBlockClick} />
            ))}
         </Stage>
         

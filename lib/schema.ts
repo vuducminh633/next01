@@ -23,6 +23,7 @@ export const vias = pgTable("vias", {
   name: text("name").notNull(),         // e.g., "Vỉa 8"
   rockType: text("rock_type"),          
   description: text("description"),
+  color: text("color"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -37,7 +38,7 @@ export const cadLines = pgTable("cad_lines", {
   id: serial("id").primaryKey(),
   blockId: integer("block_id").references(() => blocks.id, { onDelete: "cascade" }).notNull(),
   
-  handle: text("handle").notNull().unique(), 
+  handle: text("handle").notNull(), 
   partType: text("part_type"),               // "Vách" (Roof) or "Trụ" (Floor)
   layer: text("layer"),                      // "F.C"
   properties: jsonb("properties"),           
@@ -53,6 +54,8 @@ export const blockMeshes = pgTable("block_meshes", {
   
   vertices: jsonb("vertices").notNull(), 
   indices: jsonb("indices").notNull(),   
+
+  color: text("color").default("#00a8ff"),
   
   createdAt: timestamp("created_at").defaultNow(),
 });
