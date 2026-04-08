@@ -188,7 +188,7 @@ export default function CadUnityLayout({ initialData }: { initialData: any }) {
     setIsDeleting(false);
   };
 
-  // --- ACTION: GENERATE SINGLE BLOCK (PERMANENT) ---
+  // ---GENERATE SINGLE BLOCK ---
   const handleGenerateBlock = async (e: React.MouseEvent, blockId: number) => {
     e.stopPropagation(); // Prevent expanding the folder
     setIsProcessing(true);
@@ -401,7 +401,7 @@ export default function CadUnityLayout({ initialData }: { initialData: any }) {
 
         <ResizeHandle onDrag={(d) => setLeftWidth(p => Math.max(150, Math.min(600, p + d)))} />
 
-{/* CENTER PANE (100% 3D Scene) */}
+        {/* CENTER PANE (3D Scene) */}
         <div className="flex-1 relative bg-[#0a0a0a] min-w-0">
           <div className="absolute top-2 left-2 z-10 bg-black/70 text-gray-400 text-[10px] px-2 py-1 rounded border border-gray-800 pointer-events-none">
             3D SCENE (Left: Select | Right: Orbit)
@@ -412,13 +412,13 @@ export default function CadUnityLayout({ initialData }: { initialData: any }) {
                 meshes={sceneMeshes} 
                 selectedIds={selectedIds} 
                 onMultiSelect={(ids) => handleMultiSelect(ids, "replace")} 
-                onBlockClick={handleBlockClick}
-/>          </div>
+                onBlockClick={handleBlockClick}/>
+          </div>
         </div>
 
         <ResizeHandle onDrag={(d) => setRightWidth(p => Math.max(200, Math.min(600, p - d)))} />
 
-{/* RIGHT PANE (MASTER INSPECTOR) */}
+        {/* RIGHT PANE (MASTER INSPECTOR) */}
         <div style={{ width: rightWidth }} className="bg-[#1a1a1a] flex flex-col shrink-0 border-l border-black h-full">
           
           {/* FIXED TAB HEADER */}
@@ -427,7 +427,7 @@ export default function CadUnityLayout({ initialData }: { initialData: any }) {
           </div>
 
           {/* ========================================= */}
-          {/* COMPONENT 1: SELECTED OBJECT INFO           */}
+          {/*  SELECTED OBJECT INFO           */}
           {/* ========================================= */}
           <button 
             onClick={() => setIsObjInfoExpanded(!isObjInfoExpanded)}
@@ -517,9 +517,7 @@ export default function CadUnityLayout({ initialData }: { initialData: any }) {
             </div>
           )}
 
-          {/* ========================================= */}
-          {/* RESIZER: Only appears if BOTH are open      */}
-          {/* ========================================= */}
+          {/* RESIZER*/}
           {isObjInfoExpanded && isMapExpanded && (
             <ResizeHandle 
               vertical 
@@ -527,9 +525,7 @@ export default function CadUnityLayout({ initialData }: { initialData: any }) {
             />
           )}
 
-          {/* ========================================= */}
-          {/* COMPONENT 2: 2D MAP PREVIEW                 */}
-          {/* ========================================= */}
+          {/* COMPONENT 2D MAP PREVIEW */}
           <button 
             onClick={() => setIsMapExpanded(!isMapExpanded)}
             className={`p-2 text-[10px] font-bold text-gray-300 uppercase bg-[#2a2a2a] hover:bg-[#333] border-b border-[#111] flex items-center gap-2 w-full text-left transition-colors shrink-0 ${!isObjInfoExpanded && isMapExpanded ? 'border-t border-black mt-auto' : 'border-t border-black'}`}

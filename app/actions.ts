@@ -329,7 +329,7 @@ export async function autoFetchFromRedis() {
 
     console.log(`[Server] Pulled new data from Redis. Formatting for database...`);
 
-    // Send the raw string directly to our function! No fake Files needed.
+    // Send the raw string directly to our function
     const saveResult = await saveCadData(rawData, "Bản đồ Live (AutoCAD)");
 
     if (saveResult.success) {
