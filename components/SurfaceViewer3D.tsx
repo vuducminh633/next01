@@ -1,21 +1,22 @@
 "use client";
 
 import { Canvas, useThree } from "@react-three/fiber";
-import { OrbitControls, Stage,Grid } from "@react-three/drei";
+import { OrbitControls, Stage, Grid, Center, Bounds, Edges } from "@react-three/drei";
 import * as THREE from "three";
-import { useMemo, useState } from "react";
+
+import { useMemo, useState, memo, useEffect } from "react";
 
 // --- MESH COMPONENT ---
-function MiningMesh({ 
+const MiningMesh = memo(function MiningMesh({ 
   data, 
   isSelected, 
   showWireframe, 
-  onBlockClick // 1. ADD THIS PROP
+  onBlockClick 
 }: { 
   data: any; 
   isSelected: boolean;
   showWireframe: boolean; 
-  onBlockClick?: (blockId: number) => void; // 2. DEFINE THE TYPE
+  onBlockClick?: (blockId: number) => void; 
 }) {
   const geometry = useMemo(() => {
     if (!data?.vertices || !data?.indices) return null;
@@ -28,20 +29,27 @@ function MiningMesh({
     return geo;
   }, [data]);
 
+
+  // This tells WebGL to delete the math from the GPU when the mesh is hidden or refreshed.
+  useEffect(() => {
+    return () => {
+      geometry?.dispose();
+    };
+  }, [geometry]);
+
   if (!geometry) return null;
 
   const meshColor = data.color || "#00a8ff";
 
   return (
     <group>
-      {/*  The Solid Mesh */}
+      {/* The Solid Mesh */}
       <mesh 
         geometry={geometry}
-        //  ADD THE R3F CLICK EVENT HERE
         onClick={(e) => {
           e.stopPropagation(); // Prevent clicking objects behind this one
-          if (onBlockClick && data.blockId) {
-            onBlockClick(data.blockId);
+          if (onBlockClick && data.id) { // Changed data.blockId to data.id based on DB structure
+            onBlockClick(data.id);
           }
         }}
         onPointerOver={(e) => (document.body.style.cursor = 'pointer')}
@@ -52,19 +60,27 @@ function MiningMesh({
           side={THREE.DoubleSide}
           flatShading={false}
           shininess={50}
+          polygonOffset={true}
+          polygonOffsetFactor={1}
+          polygonOffsetUnits={1}
         />
       </mesh>
 
-      {/*  The Wireframe Overlay */}
+      {/* The Wireframe Overlay */}
       {showWireframe && (
-        <lineSegments>
-          <wireframeGeometry args={[geometry]} />
-          <lineBasicMaterial color="white" opacity={0.3} transparent linewidth={1} />
-        </lineSegments>
+       <mesh geometry={geometry}>
+          <meshBasicMaterial 
+            color="white" 
+            wireframe={true}  // WebGL draws the triangles as lines!
+            transparent={true} 
+            opacity={0.08} 
+            depthWrite={false} 
+        />
+      </mesh>
       )}
     </group>
   );
-}
+});
 
 // --- SELECTION MANAGER ---
 function SelectionManager({ 
@@ -93,10 +109,8 @@ function SelectionManager({
         const sy = (-(v.y) * 0.5 + 0.5) * size.height;
 
         if (isClick) {
-            // Loose click detectio
             if (Math.abs(sx - minX) < 20 && Math.abs(sy - minY) < 20) newSelection.add(meshData.id);
         } else {
-            // Box selection
             if (sx >= minX && sx <= maxX && sy >= minY && sy <= maxY) newSelection.add(meshData.id);
         }
     });
@@ -111,12 +125,14 @@ export default function SurfaceViewer3D({
   meshes, 
   selectedIds, 
   onMultiSelect ,
-  onBlockClick
+  onBlockClick,
+  isPaused = false
 }: { 
   meshes: any[], 
   selectedIds?: Set<number>, 
   onMultiSelect?: (ids: Set<number>) => void, 
-  onBlockClick?: (blockId: number) => void
+  onBlockClick?: (blockId: number) => void,
+  isPaused?: boolean
 }) {
   const safeIds = selectedIds || new Set();
   const safeSelect = onMultiSelect || (() => {});
@@ -127,7 +143,6 @@ export default function SurfaceViewer3D({
   const [finishedBox, setFinishedBox] = useState<any>(null);
 
   const [showGrid, setShowGrid] = useState(true);
-
   const [showWireframe, setShowWireframe] = useState(true);
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -157,7 +172,6 @@ export default function SurfaceViewer3D({
     >
       {/* --- UNITY-STYLE TOOLBAR --- */}
       <div className="absolute top-2 right-2 z-10 flex gap-2">
-        {/* Wireframe Button */}
         <button
           onClick={() => setShowWireframe(!showWireframe)}
           className={`px-3 py-1 text-[10px] font-bold rounded border transition-colors shadow-lg flex items-center gap-2 ${
@@ -169,7 +183,6 @@ export default function SurfaceViewer3D({
           <span className="text-sm">◩</span> {showWireframe ? "MESH: ON" : "MESH: OFF"}
         </button>
 
-        {/* Grid Button */}
         <button
           onClick={() => setShowGrid(!showGrid)}
           className={`px-3 py-1 text-[10px] font-bold rounded border transition-colors shadow-lg flex items-center gap-2 ${
@@ -182,7 +195,20 @@ export default function SurfaceViewer3D({
         </button>
       </div>
 
-      <Canvas shadows camera={{ position: [100, 100, 100], fov: 50 }}>
+      {/* ---CPU PAUSE OVERLAY --- */}
+      {isPaused && (
+        <div className="absolute inset-0 bg-black/70 z-40 flex flex-col items-center justify-center backdrop-blur-sm">
+           <div className="text-4xl animate-spin mb-4">↺</div>
+           <h2 className="text-white text-xl font-bold tracking-widest uppercase">Processing C++ Mesh Data</h2>
+           <p className="text-blue-400 text-sm mt-2 font-mono">3D Rendering Paused: Freeing up CPU cores...</p>
+        </div>
+      )}
+
+      <Canvas 
+          camera={{ position: [100, 100, 100], fov: 50, far: 100000 }}
+          frameloop={isPaused ? "never" : "demand"}
+      >
+
         <color attach="background" args={["#1a1a2e"]} />
         
         <OrbitControls 
@@ -196,32 +222,33 @@ export default function SurfaceViewer3D({
         
         {/* --- INFINITE GRID --- */}
         {showGrid && (
-          <group>
-            <Grid 
-              infiniteGrid 
-              fadeDistance={20000} // Fades out smoothly in the distance
-              sectionColor="#444444" 
-              cellColor="#222222" 
-              sectionSize={100} // Major grid lines
-              cellSize={10}     // Minor grid lines
-            />
+         <group>
+            <gridHelper args={[5000, 50, "#555555", "#333333"]} />
             <axesHelper args={[500]} />
-          </group>
+         </group>
         )}
 
         <ambientLight intensity={0.6} />
         <directionalLight position={[100, 100, 50]} intensity={0.8} />
         <directionalLight position={[-100, -100, -50]} intensity={0.4} />
 
-        <Stage intensity={0} environment={null} adjustCamera={true}>
-           {meshes.map((m, i) => (
-             <MiningMesh  
-                  key={i} data={m} 
-                  isSelected={safeIds.has(m.id)}
-                  showWireframe={showWireframe} 
-                  onBlockClick={onBlockClick} />
-           ))}
-        </Stage>
+
+        {/* Auto-Center and Auto-Zoom the camera to fit the CAD data */}
+        <Bounds key={meshes.length} fit clip margin={1.2}>
+            <Center>
+               <group>
+                  {meshes.map((m, i) => (
+                    <MiningMesh  
+                        key={m.id || i}
+                        data={m} 
+                        isSelected={safeIds.has(m.id)}
+                        showWireframe={showWireframe} 
+                        onBlockClick={onBlockClick} />
+                  ))}
+                </group>
+            </Center>
+        </Bounds>
+       
         
         <SelectionManager meshes={meshes} selectionBox={finishedBox} onSelect={safeSelect} />
       </Canvas>

@@ -234,6 +234,7 @@ export async function deleteMap(mapId: number) {
     return { success: false, error: "Failed to delete project" };
   }
 }
+
 export async function generateBatch3DModel(lineIds: number[]) {
   process.stdout.write(`\n\n>>> CRITICAL: SERVER RECEIVED CALL FOR ${lineIds.length} IDs <<<\n\n`);
   try {
@@ -267,46 +268,64 @@ export async function generateBatch3DModel(lineIds: number[]) {
       groupedByBlock[item.blockId].push(item);
     }
 
+    const allBlocks = Object.entries(groupedByBlock);
+    console.log(`[Server] 4. Found ${allBlocks.length} separate Blocks. Launching C++ workers in CHUNKS...`);
+
     const generatedMeshes = [];
-    console.log(`[Server] 4. Found ${Object.keys(groupedByBlock).length} separate Blocks. Sending to C++ Converter...`);
+    
+  
+    const CHUNK_SIZE = 4; 
 
-    // Loop through each group and generate a separate mesh
-    for (const [blockIdStr, blockItems] of Object.entries(groupedByBlock)) {
-      const blockId = parseInt(blockIdStr);
-      console.log(`[Server] -> Processing Block ID: ${blockId} with ${blockItems.length} lines`);
+    for (let i = 0; i < allBlocks.length; i += CHUNK_SIZE) {
+      const chunk = allBlocks.slice(i, i + CHUNK_SIZE);
+      console.log(`\n[Server] ---> Processing Batch ${Math.floor(i / CHUNK_SIZE) + 1} of ${Math.ceil(allBlocks.length / CHUNK_SIZE)}...`);
 
-      const mesh = await runCppConverter(blockItems);
+      const promises = chunk.map(async ([blockIdStr, blockItems]) => {
+        const blockId = parseInt(blockIdStr);
+        console.log(`[Server] -> Processing Block ID: ${blockId} with ${blockItems.length} lines`);
 
-      if (mesh) {
-        // Find the color specifically for this Block
-        const rawProps = blockItems[0]?.properties as any;
-        let previewColor = "#00a8ff"; // Default fallback
-        
-        if (rawProps?.TrueColor && Array.isArray(rawProps.TrueColor) && rawProps.TrueColor.length === 3) {
-          const [r, g, b] = rawProps.TrueColor;
-          // Only use RGB if it is not pure black [0,0,0]
-          if (r !== 0 || g !== 0 || b !== 0) {
-            previewColor = rgbToHex(r, g, b);
+        const mesh = await runCppConverter(blockItems);
+
+        if (mesh) {
+          // Find the color specifically for this Block
+          const rawProps = blockItems[0]?.properties as any;
+          let previewColor = "#00a8ff"; // Default fallback
+          
+          if (rawProps?.TrueColor && Array.isArray(rawProps.TrueColor) && rawProps.TrueColor.length === 3) {
+            const [r, g, b] = rawProps.TrueColor;
+            // Only use RGB if it is not pure black [0,0,0]
+            if (r !== 0 || g !== 0 || b !== 0) {
+              previewColor = rgbToHex(r, g, b); // Assuming rgbToHex is defined higher up
+            }
           }
-        }
 
-        generatedMeshes.push({
-          ...mesh,
-          blockId: blockId,
-          color: previewColor
-        });
-      } else {
-        console.error(`[Server] -> Error: Converter failed for Block ID: ${blockId}`);
-      }
+          return {
+            ...mesh,
+            blockId: blockId,
+            color: previewColor
+          };
+        } else {
+          console.error(`[Server] -> Error: Converter failed for Block ID: ${blockId}`);
+          return null;
+        }
+      });
+
+      // Wait for ONLY this chunk of 4 to finish before moving to the next 4
+      const chunkResults = await Promise.all(promises);
+      
+      // Filter out any blocks that crashed (the null values)
+      const successfulMeshes = chunkResults.filter((res) => res !== null);
+      
+      // Push the successful ones into our final array
+      generatedMeshes.push(...successfulMeshes);
     }
 
     if (generatedMeshes.length === 0) {
         return { error: "Converter failed to generate any meshes" };
     }
 
-    console.log(`[Server] 5. Batch generation successful! Returning ${generatedMeshes.length} meshes to UI...`);
+    console.log(`\n[Server] 5. Batch generation successful! Returning ${generatedMeshes.length} meshes to UI...`);
     
-    // Notice we are returning `meshes` (array) instead of `mesh` (single object)
     return { success: true, meshes: generatedMeshes };
 
   } catch (e: any) {

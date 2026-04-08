@@ -95,7 +95,7 @@ export default function CadUnityLayout({ initialData }: { initialData: any }) {
 
   const [activeBlockInfo, setActiveBlockInfo] = useState<{ id: number; name: string; viaName: string; totalLines: number; vachCount: number; truCount: number } | null>(null);
 
-  const handleBlockClick = (blockId: number) => {
+  const handleBlockClick = useCallback((blockId: number) => {
     let foundBlock: any = null;
     let parentVia: any = null;
 
@@ -127,7 +127,7 @@ export default function CadUnityLayout({ initialData }: { initialData: any }) {
       truCount: truCount,
     });
     setInspectedItem({ type: 'block', data: foundBlock });
-  };
+  }, [mapData]);
 
   // Keep state synced if server data changes
   useEffect(() => { 
@@ -222,7 +222,7 @@ export default function CadUnityLayout({ initialData }: { initialData: any }) {
     setIsProcessing(true);
     try {
       const idsToProcess = Array.from(selectedIds);
-      // LOG 3: Right before the network call
+      //Right before the network call
     console.log("Attemping Server Action call with:", idsToProcess);
       const result = await generateBatch3DModel(idsToProcess);
       if (result.success && result.meshes) {
@@ -412,7 +412,9 @@ export default function CadUnityLayout({ initialData }: { initialData: any }) {
                 meshes={sceneMeshes} 
                 selectedIds={selectedIds} 
                 onMultiSelect={(ids) => handleMultiSelect(ids, "replace")} 
-                onBlockClick={handleBlockClick}/>
+                onBlockClick={handleBlockClick}
+                isPaused={isProcessing}
+                />
           </div>
         </div>
 
